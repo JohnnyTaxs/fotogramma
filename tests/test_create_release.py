@@ -10,6 +10,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
+import urllib.request
+from urllib.request import ProxyHandler, build_opener
 
 from deployment.create_release import main as create_release
 
@@ -75,8 +77,11 @@ class CreateReleaseTests(unittest.TestCase):
         self.port = self.server.server_address[1]
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
+        self.previous_opener = urllib.request._opener
+        urllib.request._opener = build_opener(ProxyHandler({}))
 
     def tearDown(self):
+        urllib.request._opener = self.previous_opener
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)

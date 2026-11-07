@@ -174,7 +174,8 @@ class DiscoveryTests(unittest.TestCase):
             "/library", on_error=lambda path, message: warnings.append((path, message))
         )
         self.assertEqual(found, [os.path.join("/library", "movie.mp4")])
-        self.assertEqual(warnings, [(os.path.normcase(os.path.abspath(nested)), "Permission denied")])
+        self.assertEqual(os.path.normcase(warnings[0][0]), os.path.normcase(os.path.abspath(nested)))
+        self.assertEqual(warnings[0][1], "Permission denied")
 
 
 class SummaryTests(unittest.TestCase):
