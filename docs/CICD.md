@@ -17,7 +17,7 @@ Linux uses Debian with system Python and PySide6 installed through `apt`. Window
 Each build job performs:
 
 1. `actions/checkout@v4`
-2. Linux: `apt-get` installs Python, pip, and the OpenGL, D-Bus, font, GLib, X11/XCB, and xkbcommon runtime libraries listed in the workflow, followed by `python3 -m pip install --break-system-packages pyside6-essentials`; Windows/macOS: `actions/setup-python@v5` and `astral-sh/setup-uv@v5`
+2. Linux: `apt-get` installs Python, pip, the shared Python runtime required by PyInstaller, and the OpenGL, D-Bus, font, GLib, X11/XCB, and xkbcommon runtime libraries listed in the workflow, followed by `python3 -m pip install --break-system-packages pyside6-essentials`; Windows/macOS: `actions/setup-python@v5` and `astral-sh/setup-uv@v5`
 3. FFmpeg installation through Homebrew only on macOS ARM
 4. All `unittest` tests with Qt `offscreen`
 5. `deployment/build.py`
