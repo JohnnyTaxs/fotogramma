@@ -12,15 +12,16 @@ Il workflow `.forgejo/workflows/build-release.yml` esegue test e build su ogni p
 
 **macOS Intel è escluso intenzionalmente.** Le architetture derivano da `platform.machine()` durante la build, quindi i nomi degli archivi possono variare solo se cambia il runner. Per Linux si usa il label `docker`, coerente con gli altri workflow self-hosted della infrastruttura; `actions/setup-python` installa Python 3.13 nel container del job.
 
+Sul runner Alpine si usa Python di sistema e il pacchetto `py3-pyside6` della distribuzione: i wheel `manylinux` di PySide e i build autonomi di `setup-python` dipendono da glibc e non sono adatti a musl. Su Linux CI non viene quindi invocato `uv run`; PyInstaller viene installato tramite pip nel Python di sistema. Windows e macOS continuano a usare uv.
+
 Ogni job esegue:
 
 1. `actions/checkout@v4`
-2. Python 3.13 tramite `actions/setup-python@v5`
-3. `astral-sh/setup-uv@v5`
-4. Installazione FFmpeg con Homebrew solo su macOS ARM
-5. Tutti i test `unittest` con Qt `offscreen`
-6. Build `deployment/build.py`
-7. Upload dello ZIP tramite `actions/upload-artifact@v4`
+2. Su Linux/Alpine: `apk add python3 py3-pip py3-pyside6`; su Windows/macOS: `actions/setup-python@v5` e `astral-sh/setup-uv@v5`
+3. Installazione FFmpeg con Homebrew solo su macOS ARM
+4. Tutti i test `unittest` con Qt `offscreen`
+5. Build `deployment/build.py`
+6. Upload dello ZIP tramite `actions/upload-artifact@v4`
 
 Su Windows e Linux, `deployment/prepare_ffprobe.py` scarica automaticamente le build statiche di FFmpeg. Su macOS viene usato `brew install ffmpeg || brew upgrade ffmpeg`.
 

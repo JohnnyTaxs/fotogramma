@@ -28,23 +28,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.13
+      - name: Install Alpine Python and Qt (Linux only)
+        if: matrix.os == 'docker'
+        run: apk add --no-cache python3 py3-pip py3-pyside6
+
+      - name: Setup Python 3.13 (not Alpine)
+        if: matrix.os != 'docker'
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
-      - name: Setup uv
+      - name: Setup uv (not Alpine)
+        if: matrix.os != 'docker'
         uses: astral-sh/setup-uv@v5
 
       - name: Install FFmpeg (macOS ARM only)
         if: matrix.os == 'macos-15'
         run: brew install ffmpeg || brew upgrade ffmpeg
 
-      - name: Run tests
+      - name: Run tests (not Alpine)
+        if: matrix.os != 'docker'
         run: uv run --no-project --with pyside6-essentials python -m unittest discover -s tests -q
 
-      - name: Build portable app
+      - name: Run tests (Alpine)
+        if: matrix.os == 'docker'
+        run: python3 -m unittest discover -s tests -q
+
+      - name: Build portable app (not Alpine)
+        if: matrix.os != 'docker'
         run: uv run --no-project --with pyside6-essentials --with pyinstaller==6.22.3 python deployment/build.py
+
+      - name: Build portable app (Alpine)
+        if: matrix.os == 'docker'
+        run: python3 -m pip install --break-system-packages pyinstaller==6.22.3 && python3 deployment/build.py
 
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
@@ -69,6 +85,9 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
+
+      - name: Install Python for release
+        run: apk add --no-cache python3
 
       - name: Create or update Forgejo release
         env:
