@@ -39,9 +39,9 @@ Non vengono usate action di release specifiche per GitHub: `GITHUB_API_URL` vien
 
 ## Token e permessi
 
-Il job ha `contents: write` e usa `secrets.GITHUB_TOKEN` quando disponibile. `create_release.py` accetta anche `FORGEJO_TOKEN` come fallback.
+Il job usa `secrets.GITHUB_TOKEN` quando disponibile. `create_release.py` accetta anche `FORGEJO_TOKEN` come fallback.
 
-Se l’istanza non fornisce token automatici, creare un token Forgejo con permesso `write:repository` e aggiungerlo come secret `GITHUB_TOKEN` nelle impostazioni della repository. Il token non viene mai stampato nei log.
+Alcune versioni di Forgejo ignorano il campo `permissions` del workflow: per questo il file non lo include più. Abilitare la pubblicazione tramite **Authorized Integrations**, assegnando al job/release il permesso di scrittura sulla repository. Se l’istanza non fornisce token automatici, creare un token Forgejo con permesso `write:repository` e aggiungerlo come secret `GITHUB_TOKEN` nelle impostazioni della repository. Il token non viene mai stampato nei log.
 
 ## Requisiti dei runner
 
