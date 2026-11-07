@@ -586,14 +586,15 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.worker and self.worker.isRunning():
-            answer = QMessageBox.question(
-                self,
-                "Analisi in corso",
-                "Vuoi interrompere l’analisi e chiudere Fotogramma?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if answer != QMessageBox.Yes:
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("Analisi in corso")
+            dialog.setText("Vuoi interrompere l’analisi e chiudere Fotogramma?")
+            dialog.setIcon(QMessageBox.Icon.Question)
+            stop_button = dialog.addButton("Interrompi e chiudi", QMessageBox.ButtonRole.DestructiveRole)
+            keep_button = dialog.addButton("Continua", QMessageBox.ButtonRole.RejectRole)
+            dialog.setDefaultButton(keep_button)
+            dialog.exec()
+            if dialog.clickedButton() is not stop_button:
                 event.ignore()
                 return
             self.worker.cancel()

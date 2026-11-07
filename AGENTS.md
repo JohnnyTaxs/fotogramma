@@ -75,6 +75,7 @@ The table uses native header sorting, not HTML pagination. For new columns updat
 
 - PyInstaller includes `static/`, `ffmpeg`, and `ffprobe` through `deployment/Fotogramma.spec`.
 - On macOS the portable ZIP is created with `ditto -c -k --sequesterRsrc --keepParent`, never with `shutil.make_archive`: a generic ZIP writer stores framework symbolic links as file copies, breaks the ad-hoc signature, and macOS kills the app at launch. `deployment/build.py` re-extracts the archive and runs `codesign --verify --deep --strict` before publishing.
+- `deployment/Fotogramma.spec` keeps only the Qt plugins the app uses on macOS (`platforms`, `styles`), excludes unused PySide6 modules, and lists vendored FFmpeg dylibs with destination `.` so each one is packaged once. Changing these lists requires rebuilding and re-checking both launches and `codesign`. Do not remove framework binaries from the TOC on their own: PyInstaller leaves dangling framework links and the bundle signature becomes invalid.
 - On macOS, `ffprobe_environment()` uses `lib` through `DYLD_LIBRARY_PATH`.
 - `deployment/prepare_ffprobe.py` verifies with `DYLD_PRINT_LIBRARIES` that no Homebrew library is loaded by `ffmpeg` or `ffprobe`.
 - Windows and Linux download both binaries from static archives without extracting arbitrary paths.

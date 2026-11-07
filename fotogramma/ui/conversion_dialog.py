@@ -37,15 +37,23 @@ class ConversionDialog(QDialog):
         self.container = "mkv"
         self.destination_dir = str(Path(videos[0].path).parent / "Fotogramma-H265")
         self.setWindowTitle("Converti in H.265")
-        self.setMinimumWidth(780)
+        self.setMinimumWidth(760)
+        self.resize(880, 720)
+        self.setSizeGripEnabled(True)
         layout = QVBoxLayout(self)
-        layout.setSpacing(14)
+        layout.setContentsMargins(20, 14, 20, 12)
+        layout.setSpacing(8)
 
         self.count_label = QLabel(f"{len(videos)} file selezionati. Gli originali restano invariati.")
         self.count_label.setStyleSheet("font-weight: 650;")
         layout.addWidget(self.count_label)
 
         form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(5)
         self.profile_combo = QComboBox()
         for key, profile in PROFILES.items():
             self.profile_combo.addItem(profile.label, key)
@@ -53,14 +61,10 @@ class ConversionDialog(QDialog):
         self.profile_combo.currentIndexChanged.connect(self._profile_changed)
         form.addRow("Profilo", self.profile_combo)
 
-        self.profile_description = QLabel()
-        self.profile_description.setObjectName("muted")
-        self.profile_description.setWordWrap(True)
-        form.addRow("", self.profile_description)
-
         self.crf_spin = QSpinBox()
         self.crf_spin.setRange(16, 35)
         self.crf_spin.setValue(22)
+        self.crf_spin.setMaximumWidth(120)
         form.addRow("CRF · qualità", self.crf_spin)
 
         self.preset_combo = QComboBox()
@@ -70,20 +74,20 @@ class ConversionDialog(QDialog):
         self.pixel_combo = QComboBox()
         self.pixel_combo.addItem("10-bit · banding ridotto", "yuv420p10le")
         self.pixel_combo.addItem("8-bit · massima compatibilità", "yuv420p")
-        form.addRow("Pixel format", self.pixel_combo)
+        form.addRow("Formato pixel", self.pixel_combo)
 
         self.tune_combo = QComboBox()
         self.tune_combo.addItem("Nessuno", "")
         self.tune_combo.addItem("Animation", "animation")
         self.tune_combo.addItem("Film", "film")
         self.tune_combo.addItem("Grain", "grain")
-        form.addRow("Tuning contenuto", self.tune_combo)
+        form.addRow("Ottimizzazione contenuto", self.tune_combo)
 
         self.aq_combo = QComboBox()
         self.aq_combo.addItem("Automatico", None)
         for value in range(4):
             self.aq_combo.addItem(f"AQ mode {value}", value)
-        form.addRow("Adaptive quantization", self.aq_combo)
+        form.addRow("Quantizzazione adattiva", self.aq_combo)
 
         self.audio_combo = QComboBox()
         self.audio_combo.addItem("Originale · nessuna ricompressione", "copy")
@@ -97,6 +101,12 @@ class ConversionDialog(QDialog):
         self.container_combo.addItem("MP4 · faststart", "mp4")
         form.addRow("Contenitore", self.container_combo)
         layout.addLayout(form)
+
+        self.profile_description = QLabel()
+        self.profile_description.setObjectName("muted")
+        self.profile_description.setWordWrap(True)
+        self.profile_description.setContentsMargins(0, 0, 0, 2)
+        layout.addWidget(self.profile_description)
 
         self.custom_fields = [
             self.crf_spin,
@@ -126,12 +136,15 @@ class ConversionDialog(QDialog):
         layout.addWidget(preview_label)
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
-        self.preview.setMaximumHeight(125)
-        self.preview.setStyleSheet("font-family: 'IBM Plex Mono'; font-size: 10px;")
+        self.preview.setMinimumHeight(70)
+        self.preview.setMaximumHeight(96)
+        self.preview.setStyleSheet("font-family: 'IBM Plex Mono'; font-size: 11px;")
         layout.addWidget(self.preview)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Avvia conversione")
+        buttons.button(QDialogButtonBox.Cancel).setText("Annulla")
+        buttons.setCenterButtons(False)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

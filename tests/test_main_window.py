@@ -96,6 +96,18 @@ class MainWindowTests(unittest.TestCase):
         self.assertFalse(self.window.search_online_button.isEnabled())
         self.assertTrue(self.window.convert_button.isEnabled())
 
+    def test_conversion_dialog_layout_keeps_content_visible(self):
+        dialog = ConversionDialog([video("one.mp4", "convert", "h264", 100)])
+        try:
+            dialog.show()
+            QApplication.processEvents()
+            self.assertLessEqual(dialog.minimumSizeHint().height(), 760)
+            description = dialog.profile_description
+            self.assertGreaterEqual(description.height(), description.heightForWidth(description.width()))
+            self.assertTrue(dialog.preview.minimumHeight() >= 70)
+        finally:
+            dialog.deleteLater()
+
     def test_conversion_dialog_shows_real_ffmpeg_command(self):
         dialog = ConversionDialog([video("one.mp4", "convert", "h264", 100)])
         try:
