@@ -6,11 +6,11 @@ Il workflow `.forgejo/workflows/build-release.yml` esegue test e build su ogni p
 
 | Job | Runner | Output |
 | --- | --- | --- |
-| Linux | `ubuntu-latest` | `Fotogramma-Linux-x86_64.zip` |
+| Linux | `docker` | `Fotogramma-Linux-x86_64.zip` |
 | Windows | `windows-latest` | `Fotogramma-Windows-amd64.zip` |
 | macOS ARM | `macos-15` | `Fotogramma-Darwin-arm64.zip` |
 
-**macOS Intel è escluso intenzionalmente.** Le architetture derivano da `platform.machine()` durante la build, quindi i nomi degli archivi possono variare solo se cambia il runner.
+**macOS Intel è escluso intenzionalmente.** Le architetture derivano da `platform.machine()` durante la build, quindi i nomi degli archivi possono variare solo se cambia il runner. Per Linux si usa il label `docker`, coerente con gli altri workflow self-hosted della infrastruttura; `actions/setup-python` installa Python 3.13 nel container del job.
 
 Ogni job esegue:
 
@@ -45,7 +45,7 @@ Alcune versioni di Forgejo ignorano il campo `permissions` del workflow: per que
 
 ## Requisiti dei runner
 
-I label `ubuntu-latest`, `windows-latest` e `macos-15` devono esistere nel pool Forgejo Actions. Se i runner self-hosted usano label diverse, aggiornare `matrix.os` nel workflow. I runner devono poter accedere a:
+I label `docker`, `windows-latest` e `macos-15` devono esistere nel pool Forgejo Actions. Se i runner self-hosted usano label diverse, aggiornare `matrix.os` nel workflow. I runner devono poter accedere a:
 
 - GitHub o al mirror Forgejo per scaricare le action;
 - PyPI per le dipendenze;

@@ -81,7 +81,7 @@ La tabella usa ordinamento nativo degli header, non paginazione HTML. Per nuove 
 
 ## CI/CD e release
 
-Il workflow `.forgejo/workflows/build-release.yml` esegue test e build su Linux, Windows e macOS ARM (`macos-15`). Non aggiungere macOS Intel senza una decisione esplicita.
+Il workflow `.forgejo/workflows/build-release.yml` esegue test e build su Linux (`docker`), Windows e macOS ARM (`macos-15`). Non aggiungere macOS Intel o il label `ubuntu-latest` senza una decisione esplicita.
 
 `deployment/create_release.py` pubblica o aggiorna la release tramite `GITHUB_API_URL` e `GITHUB_REPOSITORY`, senza action di release GitHub-specifiche. In caso di rerun deve sostituire gli asset omonimi, non duplicarli. Non stampare mai `GITHUB_TOKEN` o `FORGEJO_TOKEN`.
 
