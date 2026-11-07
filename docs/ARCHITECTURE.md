@@ -1,6 +1,6 @@
-# Architettura nativa
+# Native architecture
 
-Fotogramma Desktop non ha alcun componente HTTP. L’eseguibile avvia direttamente `QApplication` e una `MainWindow` Qt.
+Fotogramma Desktop has no HTTP component. The executable starts `QApplication` and a native `MainWindow` directly.
 
 ```text
 fotogramma.__main__
@@ -13,141 +13,139 @@ QApplication + MainWindow
         +--> ScanWorker (QThread)
                 |
                 +--> discover_videos
-                +--> probe_videos (max 4 processi ffprobe)
+                +--> probe_videos (up to 4 ffprobe processes)
                 |
                 v
-        segnali Qt nel GUI thread
+        Qt signals in the GUI thread
                 |
                 v
 VideoTableModel --> VideoFilterProxy --> QTableView
         |
-        +--> selezione video --> ricerca esterna oppure ConversionWorker
+        +--> selected videos --> external search or ConversionWorker
                                       |
-                                      +--> ffmpeg (nuovi file .h265)
+                                      +--> ffmpeg (new .h265 files)
 ```
 
-## Moduli
+## Modules
 
 ### `fotogramma/app.py`
 
-- Crea `QApplication` e carica i font tramite `resource_path`.
-- Applica il QSS Cinema Pop.
-- Espone `--directory`, `--scan-on-start` e `--smoke-test` per verifiche automatizzate.
-- Chiude la finestra dopo una scansione smoke test soltanto quando il worker è terminato.
+- Creates `QApplication` and loads fonts through `resource_path`.
+- Applies the Cinema Pop QSS theme and original application icon.
+- Exposes `--directory`, `--scan-on-start`, and `--smoke-test` for automated verification.
+- Closes smoke-test runs only after the worker has finished.
 
 ### `core/scanner.py`
 
-Contiene il motore condiviso concettualmente con la webapp ma incluso come sorgente nel progetto. Non dipende da Qt.
+Contains the video engine, independent of Qt.
 
-- `discover_videos`: ricerca deterministica e warning `os.walk`.
-- `probe_video`: `Popen` con timeout 45 secondi, JSON e cancellazione.
-- `probe_videos`: massimo quattro processi per batch, senza una seconda ondata in coda.
-- `get_ffprobe_path`: in frozen preferisce il binario incluso.
-- `ffprobe_environment`: in macOS frozen aggiunge `lib` a `DYLD_LIBRARY_PATH`.
-
-### `ui/workers.py`
-
-`ScanWorker` esegue la scansione fuori dal GUI thread. Segnali:
-
-- `progress(processed, total, current_file)` con `total = -1` durante discovery;
-- `scanCompleted(videos, warnings, cancelled)`;
-- `failed(message)` per errori non recuperabili.
-
-Il worker non tocca mai widget o modelli direttamente.
+- `discover_videos`: deterministic traversal and `os.walk` warnings.
+- `probe_video`: `Popen` with a 45-second timeout, JSON metadata, and cancellation.
+- `probe_videos`: up to four processes per batch, with no second queued wave.
+- `get_ffprobe_path`: prefers the bundled binary in frozen applications.
+- `ffprobe_environment`: adds `lib` to `DYLD_LIBRARY_PATH` in frozen macOS builds.
 
 ### `core/media_tools.py`
 
-`get_ffmpeg_path()` risolve `ffmpeg` in sviluppo e frozen, preferendo il binario nel bundle. `ffprobe_environment()` viene condiviso anche dai processi di conversione per trovare le dylib incluse.
+`get_ffmpeg_path()` resolves `ffmpeg` in source and frozen builds, preferring the bundled binary. `ffprobe_environment()` is shared with conversion processes so they use the included native libraries.
 
 ### `core/conversion.py`
 
-`ConversionProfile` definisce CRF, preset, pixel format, tune, AQ mode e comportamento audio. I profili disponibili sono `balanced`, `quality`, `anime` e `light`, più `custom_profile` per la modalità manuale.
+`ConversionProfile` defines CRF, preset, pixel format, tune, AQ mode, and audio behavior. Available profiles are `max_quality`, `balanced`, and `fast`, plus `custom_profile` for manual configuration.
 
-`build_ffmpeg_args()` genera:
+`build_ffmpeg_args()` generates:
 
-- `-n` per non sovrascrivere mai;
-- `-map 0` per tutti gli stream;
-- `libx265` con CRF/preset/pixel format scelti;
-- audio `copy` oppure AAC con bitrate;
-- sottotitoli e dati `copy`;
-- metadati e capitoli originali;
-- `+faststart` solo per MP4;
-- `-progress pipe:1` per il progresso nativo.
+- `-n` to prevent overwriting;
+- `-map 0` for all streams;
+- `libx265` with the selected CRF, preset, and pixel format;
+- audio `copy` or AAC with a selected bitrate;
+- subtitles and data `copy`;
+- original metadata and chapters;
+- `+faststart` only for MP4;
+- `-progress pipe:1` for native progress reporting.
 
-`allocate_output_path()` aggiunge `.h265` al nome e un contatore progressivo se il file esiste già. L’originale resta intatto nella modalità predefinita.
+`allocate_output_path()` adds `.h265` and a numeric suffix when the destination exists. `allocate_partial_path()` creates a same-filesystem temporary file used only after full validation and preserves the original MKV/MP4 extension.
 
 ### `core/verification.py`
 
-La sostituzione opzionale usa due fasi separate:
+Verified replacement has two separate phases:
 
-1. `validate_conversion_output()` verifica codec HEVC, durata entro max(1 secondo, 1%), stesso numero/tipo di stream e decodifica completa tramite `ffmpeg -v error -i output -f null -`.
-2. `replace_verified_output()` rinomina l’originale in `.fotogramma-backup`, sposta il `.partial` sul percorso originale, ricontrolla il codec e solo dopo elimina il backup.
+1. `validate_conversion_output()` checks HEVC, duration within max(1 second, 1%), matching stream counts, and a full decode using `ffmpeg -v error -i output -f null -`.
+2. `replace_verified_output()` renames the original to `.fotogramma-backup`, moves the `.partial` over the original path, checks the codec again, and only then deletes the backup.
 
-Se un test fallisce non avviene alcuna sostituzione. Se il controllo finale fallisce dopo la rinomina, il backup ripristina l’originale. `allocate_partial_path()` mantiene lo stesso contenitore di MKV/MP4 e rifiuta WebM.
+If any test fails, no replacement occurs. If the final check fails after renaming, the backup restores the original. WebM replacement is unsupported.
 
 ### `core/search.py`
 
-Ripulisce il titolo dai tag di release e costruisce un URL `https://1337x.to/search/<titolo+H.265>/1/`, includendo la prima pagina richiesta dal sito. `QDesktopServices.openUrl()` apre il browser esterno solo dopo un’azione esplicita; nessuna richiesta di rete passa dall’app.
+Cleans release tags from the title and builds `https://1337x.to/search/<title+H.265>/1/`, including the required first-page suffix. `QDesktopServices.openUrl()` opens the external browser only after an explicit user action; no network request is made by the app itself.
 
 ### `ui/workers.py`
 
-`ConversionWorker` elabora una coda sequenziale per evitare saturazione di CPU e disco. Unisce `stderr=STDOUT`, legge `out_time_ms` per calcolare la percentuale sulla durata del video e chiude sempre lo stream dopo `wait()`.
+`ScanWorker` runs outside the GUI thread and emits:
+
+- `progress(processed, total, current_file)` with `total = -1` during discovery;
+- `scanCompleted(videos, warnings, cancelled)`;
+- `failed(message)` for unrecoverable errors.
+
+`ConversionWorker` processes a sequential queue to avoid CPU and disk saturation. It merges `stderr=STDOUT`, reads `out_time_ms` to compute progress relative to video duration, and always closes the output stream after `wait()`.
 
 ### `ui/models.py`
 
-`VideoTableModel` espone sei colonne native: Video, Codec, Durata, Risoluzione, Dimensione, Stato.
+`VideoTableModel` exposes six native columns: Video, Codec, Duration, Resolution, Size, and Action.
 
-Ruoli personalizzati:
+Custom roles:
 
-- `INFO_ROLE`: oggetto `VideoInfo` completo;
-- `SORT_ROLE`: valore tipizzato per l’ordinamento;
-- `CATEGORY_ROLE`: categoria usata dal proxy.
+- `INFO_ROLE`: full `VideoInfo` object;
+- `SORT_ROLE`: typed value used for sorting;
+- `CATEGORY_ROLE`: category used by the proxy.
 
-`VideoFilterProxy` applica categoria e ricerca case-insensitive su nome, percorso e codec. L’ordinamento numerico usa il ruolo custom, quindi dimensione e durata non vengono ordinate come stringhe.
+`VideoFilterProxy` applies category filtering and case-insensitive search across name, path, and codec. Numeric sorting uses the custom role, so size and duration are not sorted as strings.
 
 ### `ui/main_window.py`
 
-Gestisce:
+Handles:
 
-- selezione directory e validazione;
-- statistiche cliccabili e filtri;
-- avanzamento e cancellazione;
-- warning per risultati parziali;
-- dettagli con doppio clic;
-- export tramite `QFileDialog`;
-- chiusura con conferma se un job è attivo.
+- directory selection and validation;
+- clickable statistics and filters;
+- progress and cancellation;
+- partial-result warnings;
+- double-click details;
+- export through `QFileDialog`;
+- selection-based online search and conversion;
+- close confirmation when a job is active.
 
-`QSettings` salva solo percorso e geometria. I video restano in memoria finché l’app è aperta.
+`QSettings` stores only the directory and geometry. Videos remain in memory while the app is open.
 
-## Stati dell’interfaccia
+## UI states
 
-La `QStackedWidget` contiene:
+The `QStackedWidget` contains:
 
-1. pagina iniziale con matrice codec;
-2. pagina risultati;
-3. pagina errore con Riprova.
+1. the initial page with a codec matrix;
+2. the results page;
+3. the error page with Retry.
 
-Durante la scansione i controlli vengono disabilitati e il progresso appare nella command bar. L’interruzione non classifica i file bloccati come errori.
+Controls are disabled during scanning and progress is shown in the command bar. Interrupted files are not classified as errors.
 
-## Build frozen
+## Frozen builds
 
-`runtime.py` usa `sys._MEIPASS` per trovare asset e binari. La build onedir contiene:
+`runtime.py` uses `sys._MEIPASS` to locate assets and binaries. The onedir bundle contains:
 
-- interprete Python;
-- PySide6 Essentials e plugin Qt richiesti;
-- `static/` con font e licenze;
-- `ffmpeg`, `ffprobe` e dipendenze native;
-- codice `fotogramma` e `runtime.py`.
+- the Python interpreter;
+- PySide6 Essentials and required Qt plugins;
+- `static/` with fonts and licenses;
+- `ffmpeg`, `ffprobe`, and native dependencies;
+- the `fotogramma` package and `runtime.py`.
 
-Il pacchetto può essere spostato. La verifica esegue la build estratta con `PATH=/usr/bin:/bin`, evitando Python e Homebrew di sistema.
+The bundle can be moved. Verification extracts it in another directory and starts it with `PATH=/usr/bin:/bin`, avoiding system Python and Homebrew.
 
 ## Testing
 
-- Test motore con mock di `Popen`, `os.walk` e concorrenza.
-- Test modello/proxy con `QApplication` offscreen.
-- Test `MainWindow` per statistiche, filtri e warning.
-- Test worker su cinque video reali opzionali tramite `FOTOGRAMMA_DEMO_DIR`.
-- Test di conversione reale di un breve H.264 con verifica `hevc`, originale invariato e nessuna sovrascrittura.
-- Test profili, argomenti AAC/faststart, selezione azioni, anteprima comando e URL di ricerca.
-- Test del client di release Forgejo con server HTTP locale per creazione, recupero e sostituzione asset, senza token nei log.
-- Screenshot nativi ottenuti con `QWidget.grab()`, senza browser o screenshot HTML.
+- Engine tests with mocks for `Popen`, `os.walk`, and concurrency.
+- Model/proxy tests with offscreen `QApplication`.
+- `MainWindow` tests for statistics, filters, selection, warnings, and the conversion dialog.
+- Worker tests on five real fixtures via `FOTOGRAMMA_DEMO_DIR`.
+- Real short H.264 conversion verified as `hevc`, with the original unchanged.
+- Preset, AAC/faststart argument, selection-action, command-preview, and online URL tests.
+- Full validation, successful replacement, failed-validation preservation, and backup restoration tests.
+- GitHub release client tests with a local HTTP server for create, retrieve, and asset replacement, with no token in logs.
+- Native screenshots captured with `QWidget.grab()`, not browser or HTML screenshots.

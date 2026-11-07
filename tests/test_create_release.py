@@ -30,7 +30,7 @@ class ReleaseHandler(BaseHTTPRequestHandler):
                 self.send_error(422, "Already exists")
                 return
             payload = json.loads(body)
-            self.__class__.release = {"id": 42, "tag_name": payload["tag_name"], "html_url": "https://forgejo.example/release/42", "assets": []}
+            self.__class__.release = {"id": 42, "tag_name": payload["tag_name"], "html_url": "https://github.com/JohnnyTaxs/fotogramma/releases/tag/v1.0.0", "assets": []}
             self._json(201, self.release)
             return
         if self.path.startswith("/api/v3/repos/JohnnyTax/fotogramma-desktop/releases/42/assets"):

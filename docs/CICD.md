@@ -1,70 +1,76 @@
-# CI/CD su Forgejo
+# CI/CD with GitHub Actions
 
-Il workflow `.forgejo/workflows/build-release.yml` esegue test e build su ogni push a `main`, pull request, tag `v*` e avvio manuale.
+The workflow `.github/workflows/build-release.yml` runs on every push to `main`, pull request, `v*` tag, and manual dispatch.
 
-## Piattaforme
+## Platforms
 
 | Job | Runner | Output |
 | --- | --- | --- |
-| Linux | `docker` | `Fotogramma-Linux-x86_64.zip` |
+| Linux | `ubuntu-latest` with `node:22-bookworm` | `Fotogramma-Linux-x86_64.zip` |
 | Windows | `windows-latest` | `Fotogramma-Windows-amd64.zip` |
 | macOS ARM | `macos-15` | `Fotogramma-Darwin-arm64.zip` |
 
-**macOS Intel è escluso intenzionalmente.** Le architetture derivano da `platform.machine()` durante la build, quindi i nomi degli archivi possono variare solo se cambia il runner. Per Linux si usa il label `docker`, coerente con gli altri workflow self-hosted della infrastruttura; `actions/setup-python` installa Python 3.13 nel container del job.
+**macOS Intel is intentionally excluded.** Architecture names come from `platform.machine()` during the build, so archive names can change only if a runner changes.
 
-Il container Linux effettivo del runner è `node:22-bookworm`, quindi si usa Debian con Python e PySide6 installati tramite `apt`. Non viene invocato `uv run`; PyInstaller viene installato tramite pip nel Python di sistema. Windows e macOS continuano a usare uv.
+Linux uses Debian with system Python and PySide6 installed through `apt`. Windows and macOS use uv. The actual Linux container is `node:22-bookworm`, not Alpine.
 
-Ogni job esegue:
+Each build job performs:
 
 1. `actions/checkout@v4`
-2. Su Linux (`node:22-bookworm`): `apt-get install python3 python3-pip python3-pyside6`; su Windows/macOS: `actions/setup-python@v5` e `astral-sh/setup-uv@v5`
-3. Installazione FFmpeg con Homebrew solo su macOS ARM
-4. Tutti i test `unittest` con Qt `offscreen`
-5. Build `deployment/build.py`
-6. Upload dello ZIP tramite `actions/upload-artifact@v4`
+2. Linux: `apt-get install python3 python3-pip python3-pyside6`; Windows/macOS: `actions/setup-python@v5` and `astral-sh/setup-uv@v5`
+3. FFmpeg installation through Homebrew only on macOS ARM
+4. All `unittest` tests with Qt `offscreen`
+5. `deployment/build.py`
+6. ZIP upload through `actions/upload-artifact@v4` with a 3-day retention
 
-Su Windows e Linux, `deployment/prepare_ffprobe.py` scarica automaticamente le build statiche di FFmpeg. Su macOS viene usato `brew install ffmpeg || brew upgrade ffmpeg`.
+On Windows and Linux, `deployment/prepare_ffprobe.py` downloads static FFmpeg builds. On macOS it runs `brew install ffmpeg || brew upgrade ffmpeg`.
 
-## Release automatica
+## Do I need dedicated machines?
 
-Il job `release` parte soltanto per ref in `refs/tags/`, dopo il completamento di tutti i build job. Scarica tutti gli artifact e invoca `deployment/create_release.py`.
+Not necessarily physical machines, but PyInstaller is not a cross-compiler: each artifact must be built on its own operating system. Compatible environments are required:
 
-Lo script usa direttamente l’API Forgejo:
+- **Linux:** the existing Docker runner is sufficient, using `node:22-bookworm` and `apt`.
+- **Windows:** a Windows host or VM with label `windows-latest` to produce `Fotogramma.exe`.
+- **macOS ARM:** an Apple Silicon host with label `macos-15` to produce `Fotogramma.app`; Intel is not used.
 
-- `POST /repos/{owner}/{repo}/releases` per creare la release;
-- `GET /repos/{owner}/{repo}/releases/tags/{tag}` se esiste già;
-- elimina un asset con lo stesso nome prima di ricaricarlo, rendendo il rilancio idempotente;
-- carica tutti gli ZIP con `Content-Type: application/zip`.
+Self-hosted VMs and GitHub-hosted runners are both valid. If the pool has no compatible Windows/macOS runners, use GitHub-hosted runners with those labels or provision two VMs dedicated to running actions.
 
-Non vengono usate action di release specifiche per GitHub: `GITHUB_API_URL` viene impostato automaticamente dal contesto Forgejo (`github.api_url`).
+## Free GitHub-hosted runners
 
-## Token e permessi
+For public repositories, standard GitHub-hosted runners are free, including Windows and macOS. This avoids maintaining dedicated Windows or Apple Silicon VMs for this project.
 
-Il job usa `secrets.GITHUB_TOKEN` quando disponibile. `create_release.py` accetta anche `FORGEJO_TOKEN` come fallback.
+For private repositories, GitHub provides limited monthly compute and artifact storage. Windows and macOS usage costs more than Linux, and artifact storage can accumulate quickly with large application bundles. A public mirror for CI is therefore the simplest option for this project.
 
-Alcune versioni di Forgejo ignorano il campo `permissions` del workflow: per questo il file non lo include più. Abilitare la pubblicazione tramite **Authorized Integrations**, assegnando al job/release il permesso di scrittura sulla repository. Se l’istanza non fornisce token automatici, creare un token Forgejo con permesso `write:repository` e aggiungerlo come secret `GITHUB_TOKEN` nelle impostazioni della repository. Il token non viene mai stampato nei log.
+## Automatic releases
 
-## Servono macchine dedicate?
+The `release` job runs only for `refs/tags/` after all build jobs succeed. It downloads all artifacts and invokes `deployment/create_release.py`.
 
-No, non necessariamente macchine fisiche dedicate. PyInstaller non è un cross-compiler: ogni artefatto deve essere compilato sul proprio sistema operativo. Sono però necessari ambienti compatibili:
+The script uses the GitHub API directly:
 
-- **Linux:** il solito runner Docker è sufficiente, con immagine `node:22-bookworm` e pacchetti `apt`.
-- **Windows:** un host o VM Windows con label `windows-latest` per produrre `Fotogramma.exe`.
-- **macOS ARM:** un host Apple Silicon con label `macos-15` per produrre `Fotogramma.app`; Intel non viene usato.
+- `POST /repos/{owner}/{repo}/releases` to create a release;
+- `GET /repos/{owner}/{repo}/releases/tags/{tag}` when it already exists;
+- deletion of an existing asset with the same name before re-uploading, making reruns idempotent;
+- upload of every ZIP with `Content-Type: application/zip`.
 
-Le VM self-hosted vanno bene, così come i runner cloud compatibili. Se non sono disponibili host Windows/macOS nel pool Forgejo, usare runner cloud con quei label oppure predisporre due VM dedicate al solo ruolo di runner.
+There are no release actions tied to another hosting provider: `GITHUB_API_URL` comes from the GitHub Actions context (`github.api_url`).
 
-## Requisiti dei runner
+## Token and permissions
 
-I label `docker`, `windows-latest` e `macos-15` devono esistere nel pool Forgejo Actions. Se i runner self-hosted usano label diverse, aggiornare `matrix.os` nel workflow. I runner devono poter accedere a:
+The release job has `contents: write` and uses the automatically provided `secrets.GITHUB_TOKEN`. `create_release.py` also accepts `FORGEJO_TOKEN` as a fallback for other integrations. Tokens are never printed in logs.
 
-- GitHub o al mirror Forgejo per scaricare le action;
-- PyPI per le dipendenze;
-- Homebrew per macOS;
-- gyan.dev e johnvansickle.com per i binari statici;
-- l’API Forgejo dell’istanza.
+If automatic tokens are unavailable, create a token with `write:repository` permission and add it as the `GITHUB_TOKEN` secret in the repository settings.
 
-## Pubblicare una release
+## Runner requirements
+
+Labels `ubuntu-latest`, `windows-latest`, and `macos-15` must exist in the runner pool. If self-hosted runners use different labels, update the workflow. Runners must be able to reach:
+
+- GitHub or the action mirror for action downloads;
+- PyPI for dependencies;
+- Homebrew for macOS;
+- gyan.dev and johnvansickle.com for static binaries;
+- the GitHub API of the instance.
+
+## Publishing a release
 
 ```bash
 git tag -a v1.0.0 -m "Fotogramma Desktop 1.0.0"
@@ -72,18 +78,18 @@ git push origin main
 git push origin v1.0.0
 ```
 
-Il push del tag avvia tutte le build e poi il job di release. Per rilanciare senza creare un nuovo tag, usare `workflow_dispatch` oppure riavviare il job fallito. La stessa release e gli stessi asset verranno aggiornati senza duplicati.
+The tag starts all builds and then the release job. To rerun without creating a tag, use `workflow_dispatch` or rerun the failed job. The same release and assets are updated without duplicates.
 
-## Test del client di release
+## Release client tests
 
-`tests/test_create_release.py` usa un server HTTP locale per verificare:
+`tests/test_create_release.py` uses a local HTTP server to verify:
 
-- creazione della release;
-- recupero di una release già esistente;
-- sostituzione degli asset al secondo upload;
-- assenza del token nei log.
+- release creation;
+- retrieval of an existing release;
+- asset replacement on a second upload;
+- no token in the logs.
 
-Eseguirlo con:
+Run it with:
 
 ```bash
 uv run --no-project --with pyside6-essentials python -m unittest tests.test_create_release -v

@@ -1,4 +1,4 @@
-"""Create or update a Forgejo release and upload every ZIP asset via its API."""
+"""Create or update a GitHub release and upload every ZIP asset via its API."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class ReleaseClient:
                 return json.loads(body) if body else {}
         except urllib.error.HTTPError as error:
             details = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"Forgejo API {method} {path}: HTTP {error.code}: {details}") from error
+            raise RuntimeError(f"GitHub API {method} {path}: HTTP {error.code}: {details}") from error
 
     def create_release(self, tag: str) -> dict:
         path = f"/repos/{self.repository}/releases"

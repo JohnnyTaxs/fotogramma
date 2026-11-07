@@ -1,109 +1,103 @@
-# Fotogramma Desktop
+# Fotogramma
 
-Fotogramma Desktop è la versione **nativa** di Fotogramma: una vera applicazione desktop realizzata con **PySide6/Qt Widgets**. Non usa browser, WebView, server HTTP o launcher esterni.
+Fotogramma is a **native desktop application** for inspecting a video library, identifying files that may benefit from H.265 conversion, searching for an existing H.265 version online, and converting videos directly with FFmpeg.
 
-![Fotogramma Desktop nativo](docs/assets/fotogramma-native-results.png)
+It is built with **PySide6/Qt Widgets**, not a browser, WebView, HTTP server, or launcher.
 
-## Funzionalità
+![Fotogramma Desktop](docs/assets/fotogramma-native-results.png)
 
-- Finestra nativa per macOS, Windows e Linux.
-- Ricerca ricorsiva di `.mp4`, `.mkv` e `.webm`.
-- Classificazione chiara in **da convertire**, **già compatibili** (HEVC/AV1) e **non leggibili**.
-- Statistiche con valori in evidenza, filtri, ricerca e ordinamento tramite header.
-- Azioni sulla selezione: **Cerca H.265 online** e **Converti selezionati**.
-- Scansione in background con avanzamento e interruzione.
-- Conversione diretta tramite `ffmpeg`, con profili leggibili e modalità personalizzata.
-- Icona originale con lettera F e numero 265, inclusa nella finestra e nel bundle.
-- Avvisi per cartelle non accessibili e risultati parziali.
-- Esportazione dell’elenco tramite `QFileDialog`.
-- Tema Cinema Pop con font Sora e IBM Plex Mono inclusi.
+> **Personal project:** Fotogramma was created primarily for my own use. It is shared in the hope that it may also be useful to others. **It is provided “AS IS”, without any warranty of any kind, express or implied, including but not limited to correctness, reliability, fitness for a particular purpose, non-infringement, availability, security, or data integrity. Use it at your own risk. You are solely responsible for backups and for validating converted or replaced files.**
 
-**La modalità predefinita non sovrascrive gli originali.** Le conversioni creano nuovi file `.h265.mkv` o `.h265.mp4`; se il nome esiste già, viene aggiunto un numero progressivo. La sostituzione dell’originale è opzionale e avviene solo dopo una verifica completa del risultato.
+## Features
 
-## Conversione diretta
+- Native desktop window for macOS, Windows, and Linux.
+- Recursive discovery of `.mp4`, `.mkv`, and `.webm` files.
+- Clear grouping into **to convert**, **already compatible** (HEVC/AV1), and **unreadable** files.
+- Statistics, filters, search, sortable columns, and multi-file selection.
+- **Find H.265 online** opens a cleaned-up search on 1337x.to in your default browser.
+- **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
+- Full-output validation before replacing an original file.
+- Original application icon, Cinema Pop theme, and bundled fonts.
+- No videos are modified during inspection. No media or metadata is uploaded during scanning or conversion.
 
-Seleziona uno o più video da convertire e scegli **Converti selezionati**. La finestra mostra il profilo, la destinazione e l’anteprima del comando FFmpeg prima di iniziare.
+## Conversion presets
 
-![Profili di conversione](docs/assets/fotogramma-conversion-dialog.png)
-
-### Profili disponibili
-
-| Profilo | Uso consigliato | Video | Audio predefinito |
+| Preset | Intended use | Video settings | Default audio |
 | --- | --- | --- | --- |
-| Massima qualità e compressione | Miglior rapporto qualità/dimensione, anche se lento | CRF 20, preset veryslow, AQ mode 3, 10-bit | Originale |
-| Intermedio · buona qualità | Equilibrio tra qualità, spazio e tempo | CRF 22, preset medium, 10-bit | Originale |
-| Veloce · transcode rapido | Massima velocità disponibile | CRF 26, preset ultrafast, 8-bit | Originale |
-| Personalizzato | Controllo manuale | CRF, preset, pixel format, tune e AQ mode | Originale o AAC |
+| Maximum quality and compression | Best quality/size ratio, even if slow | CRF 20, `veryslow`, AQ mode 3, 10-bit | Original |
+| Intermediate · good quality | Balanced quality, size, and speed | CRF 22, `medium`, 10-bit | Original |
+| Fast · quick transcode | Maximum transcoding speed | CRF 26, `ultrafast`, 8-bit | Original |
+| Custom | Manual control | CRF, preset, pixel format, tune, AQ mode | Original or AAC |
 
-L’audio può essere mantenuto originale oppure convertito in **AAC 128/160/256 kbps**. Tutti gli stream vengono mappati con `-map 0`, mantenendo tracce audio, sottotitoli, capitoli e metadati compatibili con il contenitore scelto.
+All streams are mapped with `-map 0`, preserving audio tracks, subtitles, chapters, and compatible metadata. Audio can be kept unchanged or encoded as **AAC 128/160/256 kbps**. MKV is recommended for stream compatibility; MP4 enables `+faststart`.
 
-Il contenitore **MKV** è consigliato per la massima compatibilità degli stream; **MP4** aggiunge `+faststart` per la riproduzione progressiva.
+The default output is a new `.h265.mkv` or `.h265.mp4` file with a numeric suffix if needed. **Originals are never overwritten in the default mode.**
 
-## Sostituzione dell’originale dopo verifica
+## Verified original replacement
 
-L’opzione **Sostituisci gli originali solo dopo verifica completa** è disattivata di default. Se viene attivata, Fotogramma lavora su file `.partial` nella stessa directory degli originali e sostituisce ciascun file soltanto dopo questi controlli:
+**Replace originals only after full validation** is an explicit, disabled-by-default option. When enabled, Fotogramma writes a `.partial` file next to the original and replaces it only after all checks pass:
 
-1. Codec di output realmente HEVC.
-2. Durata coerente con l’originale entro l’1% o 1 secondo.
-3. Stesso numero e tipo di stream audio, video, sottotitoli e dati.
-4. Decodifica completa del risultato tramite `ffmpeg -v error -i output -f null -` senza errori.
-5. Controllo finale del file sostituito prima di eliminare il backup temporaneo.
+1. Output codec is HEVC.
+2. Duration matches within 1% or 1 second.
+3. Audio, video, subtitle, and data stream counts match.
+4. Full decode succeeds with `ffmpeg -v error -i output -f null -`.
+5. The replacement passes a final codec check before the temporary backup is deleted.
 
-Se un controllo fallisce, l’originale non viene modificato. La sostituzione usa rinomina atomica sulla stessa filesystem e un backup `.fotogramma-backup` che viene eliminato solo dopo esito positivo. Per MKV e MP4 il contenitore resta coerente con l’estensione originale; la sostituzione non è disponibile per WebM.
+If any check fails, the original remains unchanged. Replacement uses an atomic rename on the same filesystem and a `.fotogramma-backup` file that is removed only after success. The container must match the original extension (MKV or MP4); WebM replacement is not supported.
 
-## Ricerca online
+## Online search
 
-Seleziona un singolo video da convertire e scegli **Cerca H.265 online**. Fotogramma apre nel browser predefinito una ricerca su **1337x.to** con titolo e `H.265`.
+Select one convertible video and choose **Find H.265 online**. Fotogramma opens `https://1337x.to/search/<title+H.265>/1/` in your default browser.
 
-Non viene scaricato alcun contenuto e non esiste integrazione torrent o WebView: viene soltanto aperto un URL esterno. Il nome del file viene ripulito dai tag di release più comuni per migliorare la ricerca. La query lascia il PC soltanto quando scegli esplicitamente questa azione.
+No content is downloaded, no torrent client is integrated, and no WebView is embedded. Common release tags are removed from the title to improve search results. A query is sent outside your computer only when you explicitly choose this action.
 
-## Avvio dalla build portabile
+## Run the portable app
 
-La build contiene **Python, Qt, font, ffmpeg e ffprobe**, quindi sul computer di destinazione non serve installare nulla.
+The portable build includes **Python, Qt, fonts, ffmpeg, and ffprobe**, so no installation is required on the destination computer.
 
-Per macOS Apple Silicon:
+For macOS Apple Silicon:
 
 ```text
 dist/Fotogramma-Darwin-arm64.zip
 ```
 
-Estrai lo ZIP, fai clic destro su `Fotogramma.app` e scegli **Apri**. La build è firmata ad hoc ma non notarizzata; Gatekeeper potrebbe chiedere conferma.
+Extract the archive, right-click `Fotogramma.app`, and choose **Open**. The bundle is ad-hoc signed but not notarized, so Gatekeeper may request confirmation.
 
-Su Windows esegui `Fotogramma.exe` dentro la cartella estratta. Su Linux esegui il binario `Fotogramma`. Ogni build va compilata sul rispettivo sistema operativo; PyInstaller non è un cross-compiler.
+On Windows, run `Fotogramma.exe` inside the extracted folder. On Linux, run the `Fotogramma` binary. Each package must be built on its own operating system: PyInstaller is not a cross-compiler.
 
-## Avvio dal codice sorgente
+## Run from source
 
-Requisiti: Python 3.10+, `ffmpeg` e `ffprobe` su `PATH` o nella cartella del progetto, PySide6 Essentials.
+Requirements: Python 3.10+, `ffmpeg` and `ffprobe` on `PATH` or in the project folder, and PySide6 Essentials.
 
-Con `uv`, senza creare un ambiente nel progetto:
+With `uv`, without creating an environment in the project:
 
 ```bash
 uv run --no-project --with pyside6-essentials python -m fotogramma
 ```
 
-Opzioni:
+Optional arguments:
 
 ```bash
-# Precompila la cartella
-uv run --no-project --with pyside6-essentials python -m fotogramma --directory /percorso/video
+# Pre-fill the library directory
+uv run --no-project --with pyside6-essentials python -m fotogramma --directory /path/to/videos
 
-# Avvia subito la scansione
+# Start scanning immediately
 uv run --no-project --with pyside6-essentials python -m fotogramma \
-  --directory /percorso/video --scan-on-start
+  --directory /path/to/videos --scan-on-start
 ```
 
-## Utilizzo
+## Usage
 
-1. Scegli una cartella con **Sfoglia** o inserisci il percorso.
-2. Seleziona **Analizza libreria**.
-3. Usa statistiche e filtri per isolare i candidati.
-4. Seleziona uno o più video per vedere le azioni disponibili.
-5. Ordina cliccando gli header e fai doppio clic su un video per i dettagli.
-6. Converti direttamente oppure esporta l’elenco da usare altrove.
+1. Choose a folder with **Browse** or enter its path.
+2. Click **Analyze library**.
+3. Use statistics and filters to narrow down candidates.
+4. Select one or more videos to reveal available actions.
+5. Click a column header to sort and double-click a video for details.
+6. Convert directly or export the list for another tool.
 
-Cartella e geometria della finestra vengono ricordate tramite `QSettings`; i risultati della scansione non vengono salvati su disco.
+The last directory and window geometry are remembered through `QSettings`; scan results are not persisted to disk.
 
-## Test
+## Tests
 
 ```bash
 QT_QPA_PLATFORM=offscreen \
@@ -111,23 +105,15 @@ QT_QPA_PLATFORM=offscreen \
   python -m unittest discover -s tests -v
 ```
 
-Per worker e conversione reale con i video dimostrativi:
+For worker and real conversion tests with demo fixtures:
 
 ```bash
-FOTOGRAMMA_DEMO_DIR=/percorso/fixture QT_QPA_PLATFORM=offscreen \
+FOTOGRAMMA_DEMO_DIR=/path/to/fixtures QT_QPA_PLATFORM=offscreen \
   uv run --no-project --with pyside6-essentials \
   python -m unittest discover -s tests -v
 ```
 
-La suite attuale contiene **35 test** per motore, modelli Qt, finestra, worker, profili, ricerca online, conversione HEVC reale, validazione completa e ripristino del backup.
-
-## CI/CD e release
-
-![Build & Release](https://git.local.tassoni.net/JohnnyTax/fotogramma-desktop/actions/workflows/build-release.yml/badge.svg)
-
-La pipeline Forgejo esegue test e build su **Linux, Windows e macOS ARM**. macOS Intel è escluso. Su ogni tag `v*` pubblica o aggiorna automaticamente una release con tutti gli ZIP portabili.
-
-Dettagli e requisiti dei runner: [CI/CD su Forgejo](docs/CICD.md).
+The suite currently contains **36 tests** covering the scanner, Qt models, main window, workers, presets, online search, real HEVC conversion, full validation, backup restoration, and release publishing.
 
 ## Build
 
@@ -136,40 +122,51 @@ uv run --no-project --with pyside6-essentials --with pyinstaller==6.22.3 \
   python deployment/build.py
 ```
 
-La guida completa è in [`deployment/README.md`](deployment/README.md).
+See [`deployment/README.md`](deployment/README.md) for platform-specific packaging instructions.
 
-## Struttura
+## CI/CD and releases
+
+![Build & Release](https://github.com/JohnnyTaxs/fotogramma/actions/workflows/build-release.yml/badge.svg)
+
+The GitHub Actions workflow in `.github/workflows/build-release.yml` runs tests and builds on **Linux, Windows, and macOS ARM**. macOS Intel is intentionally excluded. On every `v*` tag it publishes or updates a GitHub release containing all portable ZIP files.
+
+Runner and token details are documented in [CI/CD with GitHub Actions](docs/CICD.md). Public repositories can use GitHub-hosted runners for free.
+
+## Project structure
 
 ```text
 fotogramma/
-  app.py                 Entry point, icona, font e opzioni CLI
-  core/scanner.py        Discovery, ffprobe, classificazione e cancellazione
-  core/media_tools.py    Percorso di ffmpeg in sviluppo e frozen
-  core/conversion.py     Profili, argomenti FFmpeg e output senza sovrascrittura
-  core/verification.py   Validazione completa e sostituzione atomica con backup
-  core/search.py         Pulizia titolo e URL esterno 1337x.to
-  ui/main_window.py      Finestra e azioni di selezione
-  ui/conversion_dialog.py Profili e avanzamento conversione
-  ui/models.py           QAbstractTableModel e QSortFilterProxyModel
-  ui/workers.py          ScanWorker e ConversionWorker
-  ui/theme.py            QSS Cinema Pop
-  ui/widgets.py          CompositionBar nativa
-runtime.py               Percorsi risorse in sviluppo e frozen
-static/                  Font, licenze e icona originale
-deployment/              Build PyInstaller e vendor FFmpeg
-tests/                   Suite unittest, anche Qt offscreen
-docs/                    Architettura e asset dimostrativi
+  app.py                 Entry point, icon, fonts, and CLI options
+  core/scanner.py        Discovery, ffprobe, classification, cancellation
+  core/media_tools.py    ffmpeg path in source and frozen builds
+  core/conversion.py     Presets, FFmpeg arguments, safe output allocation
+  core/verification.py   Full validation and atomic backup replacement
+  core/search.py         Title cleanup and external 1337x.to URLs
+  ui/main_window.py      Main window and selection actions
+  ui/conversion_dialog.py Presets and conversion progress
+  ui/models.py           QAbstractTableModel and QSortFilterProxyModel
+  ui/workers.py          ScanWorker and ConversionWorker
+  ui/theme.py            Cinema Pop QSS
+  ui/widgets.py          Native composition bar
+runtime.py               Resource paths in source and frozen builds
+static/                  Fonts, licenses, and original icon
+deployment/              PyInstaller and FFmpeg vendoring
+tests/                   unittest suite, including offscreen Qt
+docs/                    Architecture, CI/CD, and demo assets
 ```
 
-## Documentazione
+## Documentation
 
-- [Architettura](docs/ARCHITECTURE.md)
-- [Build e distribuzione](deployment/README.md)
-- [CI/CD su Forgejo](docs/CICD.md)
-- [Guida per agenti](AGENTS.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Build and distribution](deployment/README.md)
+- [CI/CD with GitHub Actions](docs/CICD.md)
+- [Agent guide](AGENTS.md)
+- [MIT License](LICENSE)
 
-## Privacy e licenze
+## Privacy and license
 
-L’app non apre alcun server e non invia dati online durante analisi o conversione. Solo la ricerca esplicita su 1337x.to apre un URL esterno contenente il titolo del video.
+The app opens no server and sends no data online during scanning or conversion. Only the explicit 1337x.to search opens an external URL containing the video title.
 
-Sora e IBM Plex Mono sono distribuiti con le rispettive licenze SIL Open Font License incluse in `static/fonts/`. L’icona originale è inclusa in `static/icons/`.
+**Sora** and **IBM Plex Mono** are distributed with their respective SIL Open Font Licenses, included in `static/fonts/`. The original icon is included in `static/icons/`.
+
+Fotogramma itself is released under the **MIT License**. See [`LICENSE`](LICENSE) for the full text, including the warranty disclaimer.

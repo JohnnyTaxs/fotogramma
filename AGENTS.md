@@ -1,24 +1,24 @@
 # AGENTS.md
 
-Regole per agenti che modificano **Fotogramma Desktop**, il Progetto 2 nativo. La webapp in `h265-check` è un progetto separato: non trasformare questa app in un launcher o in una WebView.
+Operational guide for agents modifying **Fotogramma Desktop**, the native project. The webapp in `h265-check` is a separate project: do not turn this application into a launcher or WebView.
 
-## Invarianti
+## Invariants
 
-- **Solo widget Qt nativi** tramite PySide6 Essentials. Niente server HTTP, Electron, Tauri o Qt WebEngine. Il browser esterno è ammesso solo per aprire la ricerca 1337x.to richiesta dall’utente.
-- **La modalità predefinita non sovrascrive gli originali.** La sostituzione è consentita solo dopo validazione HEVC, durata, stream, decodifica completa e backup atomico con ripristino in caso di errore.
-- `hevc` e `av1` sono `compatible`; gli altri codec validi sono `convert`; i problemi di lettura sono `error`.
-- Analisi del solo primo stream video (`v:0`) di `.mp4`, `.mkv` e `.webm`.
-- Nessuna dipendenza CDN o servizio online a runtime.
-- `QSettings` conserva solo directory e geometria, non i risultati della scansione.
-- Build **onedir** specifica per OS/architettura, non onefile e non cross-compilata.
+- **Native Qt widgets only** through PySide6 Essentials. No HTTP server, Electron, Tauri, or Qt WebEngine. An external browser is allowed only for the user-requested 1337x.to search.
+- **Default mode never overwrites originals.** Replacement is allowed only after HEVC, duration, stream, full-decode, and final-codec validation, with an atomic backup restored on failure.
+- `hevc` and `av1` are `compatible`; every other valid codec is `convert`; read failures are `error`.
+- Only the first video stream (`v:0`) of `.mp4`, `.mkv`, and `.webm` is analyzed.
+- No CDN or online service is required at runtime.
+- `QSettings` stores only directory and geometry, not scan results.
+- Build **onedir** for each OS/architecture, never onefile and never cross-compiled.
 
-## Comandi
+## Commands
 
 ```bash
-# Avvio sorgente
+# Run from source
 uv run --no-project --with pyside6-essentials python -m fotogramma
 
-# Test completi
+# Full test suite
 QT_QPA_PLATFORM=offscreen \
   uv run --no-project --with pyside6-essentials \
   python -m unittest discover -s tests -v
@@ -27,72 +27,73 @@ QT_QPA_PLATFORM=offscreen \
 uv run --no-project --with pyside6-essentials --with pyinstaller==6.22.3 \
   python deployment/build.py
 
-# Controlli statici
+# Static checks
 python3 -m compileall -q fotogramma runtime.py deployment
 git diff --check
 ```
 
-Non installare il pacchetto completo `PySide6`: include WebEngine e altre dipendenze non necessarie. Usare sempre **PySide6-Essentials**.
+Do not install the full `PySide6` package: it includes WebEngine and unnecessary dependencies. Always use **PySide6-Essentials**.
 
-## Architettura
+## Architecture
 
-| File | Regole |
+| File | Rules |
 | --- | --- |
-| `fotogramma/app.py` | Entry point, font e timer smoke test. Non aggiungere server. |
-| `fotogramma/core/scanner.py` | Discovery, Popen, classificazione e cancellazione. Resta indipendente da Qt. |
-| `fotogramma/ui/workers.py` | `ScanWorker` e `ConversionWorker`. Nessuna operazione UI nei thread. |
-| `fotogramma/ui/main_window.py` | Tutte le interazioni avvengono nel GUI thread, inclusa la selezione multipla. |
-| `fotogramma/core/conversion.py` | Profili e argomenti FFmpeg. Usare `-n`, `-map 0` e output senza sovrascrittura. |
-| `fotogramma/core/media_tools.py` | Risoluzione di ffmpeg in sviluppo e frozen. |
-| `fotogramma/core/search.py` | Solo URL esterno 1337x.to; nessuna richiesta di rete integrata. |
-| `fotogramma/core/verification.py` | Validazione codec/durata/stream, decodifica completa e sostituzione atomica con backup. |
-| `fotogramma/ui/conversion_dialog.py` | Profili, anteprima comando e avanzamento. Mantieni controlli nel GUI thread. |
-| `fotogramma/ui/models.py` | Modello/proxy per grandi librerie, ruoli custom e badge. |
-| `fotogramma/ui/theme.py` | QSS Cinema Pop; non introdurre HTML/CSS o un secondo tema. |
-| `runtime.py` | `resource_path` per asset in sviluppo e frozen. |
-| `deployment/` | Build, download e vendor. Non rinominarla `packaging`: entrerebbe in conflitto con il pacchetto Python omonimo. |
+| `fotogramma/app.py` | Entry point, fonts, icon, and smoke-test timers. Never add a server. |
+| `fotogramma/core/scanner.py` | Discovery, Popen, classification, and cancellation. Must remain Qt-independent. |
+| `fotogramma/ui/workers.py` | `ScanWorker` and `ConversionWorker`. No UI operations in worker threads. |
+| `fotogramma/ui/main_window.py` | All interactions happen in the GUI thread, including multi-selection. |
+| `fotogramma/core/conversion.py` | Profiles and FFmpeg arguments. Use `-n`, `-map 0`, and non-overwriting output. |
+| `fotogramma/core/media_tools.py` | ffmpeg resolution in source and frozen builds. |
+| `fotogramma/core/search.py` | External 1337x.to URLs only; no integrated network requests. |
+| `fotogramma/core/verification.py` | Codec/duration/stream validation, full decode, and atomic backup replacement. |
+| `fotogramma/ui/conversion_dialog.py` | Profiles, command preview, and progress. Keep controls in the GUI thread. |
+| `fotogramma/ui/models.py` | Model/proxy for large libraries, custom roles, and badges. |
+| `fotogramma/ui/theme.py` | Cinema Pop QSS; do not introduce HTML/CSS or a second theme. |
+| `runtime.py` | `resource_path` for assets in source and frozen builds. |
+| `deployment/` | Build, download, and vendoring. Do not rename it `packaging`, which would conflict with the Python package. |
 
-Il flusso è: directory → `discover_videos` → `probe_videos` → segnali Qt → modello → proxy → `QTableView`.
+Data flow: directory → `discover_videos` → `probe_videos` → Qt signals → model → proxy → `QTableView`.
 
-## Thread e chiusura
+## Threads and shutdown
 
-- Non aggiornare widget da `ScanWorker.run()`: usa `progress`, `scanCompleted` e `failed`.
-- Conserva sempre un riferimento al worker per evitare distruzione durante l’esecuzione.
-- La cancellazione usa `threading.Event`; `probe_video` termina il processo con `Popen.kill()`.
-- In `closeEvent`, se il job è attivo, chiedi conferma e attendi la terminazione del worker prima di accettare la chiusura.
-- `ConversionWorker` usa `-progress pipe:1` e `stderr=STDOUT` per evitare deadlock; chiudi sempre `process.stdout` dopo `wait()`.
-- Non lanciare più conversioni parallele: la coda sequenziale riduce saturazione di disco e CPU. `fileStarted`, `progress`, `fileCompleted` e `conversionCompleted` aggiornano la UI solo via segnali.
-- La sostituzione usa sempre `allocate_partial_path`, `validate_conversion_output` e `replace_verified_output`. Non rinominare l’originale prima di questi passaggi e non eliminare il backup prima del controllo finale. WebM non è supportato per la sostituzione.
-- Non chiamare metodi Qt GUI da test worker eseguiti senza `QApplication` quando usi widget o `QPixmap`; i test GUI usano `QT_QPA_PLATFORM=offscreen`.
+- Never update widgets from `ScanWorker.run()`: use `progress`, `scanCompleted`, and `failed`.
+- Keep a reference to each worker to prevent destruction while running.
+- Cancellation uses `threading.Event`; `probe_video` terminates the process with `Popen.kill()`.
+- In `closeEvent`, ask for confirmation if a job is active and wait for the worker before accepting shutdown.
+- `ConversionWorker` uses `-progress pipe:1` and `stderr=STDOUT` to avoid deadlocks; always close `process.stdout` after `wait()`.
+- Do not run parallel conversions: the sequential queue reduces CPU and disk saturation. `fileStarted`, `progress`, `fileCompleted`, and `conversionCompleted` update the UI only through signals.
+- Replacement must always use `allocate_partial_path`, `validate_conversion_output`, and `replace_verified_output`. Never rename the original before these steps and never delete the backup before the final check. WebM replacement is unsupported.
+- Do not call Qt GUI methods from worker tests without `QApplication` when using widgets or `QPixmap`; GUI tests use `QT_QPA_PLATFORM=offscreen`.
 
-## Contratto del modello
+## Model contract
 
-`INFO_ROLE`, `SORT_ROLE` e `CATEGORY_ROLE` sono dipendenze interne del modello. Se li cambi, aggiorna proxy e test. `QSortFilterProxyModel.set_category` e `set_query` devono chiamare `invalidate()`; non riutilizzare il deprecato `invalidateFilter()`.
+`INFO_ROLE`, `SORT_ROLE`, and `CATEGORY_ROLE` are internal model dependencies. Update the proxy and tests when changing them. `QSortFilterProxyModel.set_category` and `set_query` must call `invalidate()`; do not use the deprecated `invalidateFilter()`.
 
-La tabella usa ordinamento nativo degli header, non paginazione HTML. Per nuove colonne aggiorna `HEADERS`, `data`, `_sort_value`, test e layout.
+The table uses native header sorting, not HTML pagination. For new columns update `HEADERS`, `data`, `_sort_value`, tests, and layout.
 
-## Build e asset
+## Build and assets
 
-- PyInstaller include `static/`, `ffmpeg` e `ffprobe` tramite `deployment/Fotogramma.spec`.
-- Su macOS, `ffprobe_environment()` usa `lib` tramite `DYLD_LIBRARY_PATH`.
-- `deployment/prepare_ffprobe.py` verifica con `DYLD_PRINT_LIBRARIES` che nessuna libreria Homebrew venga caricata da `ffmpeg` o `ffprobe`.
-- Windows/Linux scaricano entrambi i binari dagli archivi statici senza estrarre percorsi arbitrari.
-- Non committare `build/`, `dist/`, `deployment/vendor/`, `.venv/` o screenshot con dati reali.
+- PyInstaller includes `static/`, `ffmpeg`, and `ffprobe` through `deployment/Fotogramma.spec`.
+- On macOS, `ffprobe_environment()` uses `lib` through `DYLD_LIBRARY_PATH`.
+- `deployment/prepare_ffprobe.py` verifies with `DYLD_PRINT_LIBRARIES` that no Homebrew library is loaded by `ffmpeg` or `ffprobe`.
+- Windows and Linux download both binaries from static archives without extracting arbitrary paths.
+- Do not commit `build/`, `dist/`, `deployment/vendor/`, `.venv/`, or screenshots containing real user data.
 
-## CI/CD e release
+## CI/CD and releases
 
-Il workflow `.forgejo/workflows/build-release.yml` esegue test e build su Linux (`docker` con `node:22-bookworm`), Windows e macOS ARM (`macos-15`). Non aggiungere macOS Intel o il label `ubuntu-latest` senza una decisione esplicita. Sul runner Linux usare Python di sistema e `python3-pyside6` tramite `apt`, non `apk`.
+The workflow lives at `.github/workflows/build-release.yml` and runs tests and builds on Linux (`ubuntu-latest` with `node:22-bookworm`), Windows (`windows-latest`), and macOS ARM (`macos-15`). Do not add macOS Intel or Forgejo-specific runner configuration.
 
-`deployment/create_release.py` pubblica o aggiorna la release tramite `GITHUB_API_URL` e `GITHUB_REPOSITORY`, senza action di release GitHub-specifiche. In caso di rerun deve sostituire gli asset omonimi, non duplicarli. Non stampare mai `GITHUB_TOKEN` o `FORGEJO_TOKEN`.
+`deployment/create_release.py` publishes or updates a GitHub release through `GITHUB_API_URL` and `GITHUB_REPOSITORY`, replacing same-name assets instead of duplicating them. Never print `GITHUB_TOKEN` or `FORGEJO_TOKEN`.
 
-Dopo modifiche al workflow o al client di release eseguire `tests.test_create_release`. I tag di release usano SemVer (`v1.0.0`).
+After changing the workflow or release client, run `tests.test_create_release`. Release tags follow SemVer (`v1.0.0`).
 
 ## Checklist
 
-1. Nessuna dipendenza browser/WebView introdotta.
-2. Test unittest aggiornati e verdi.
-3. GUI verificata con screenshot Qt offscreen, non soltanto con test logici.
-4. Scansione di almeno cinque fixture verificata: due convert, due compatible, un error; conversione di un breve H.264 verificata come `hevc` senza modificare l’originale.
-5. Build spostata e avviata con `PATH=/usr/bin:/bin`, scansione e conversione tramite l’`ffmpeg` incluso verificate.
-6. `git diff --check` e `compileall` superati.
-7. README, `docs/` e questa guida aggiornati se architettura o comandi cambiano.
+1. No browser/WebView dependency was introduced.
+2. Unit tests are updated and green.
+3. GUI behavior is verified with offscreen Qt screenshots, not just logic tests.
+4. At least five fixtures are scanned: two convert, two compatible, one error; a short H.264 is converted and verified as `hevc` without modifying the original.
+5. The moved build starts with `PATH=/usr/bin:/bin`; scanning and conversion use the bundled `ffmpeg`.
+6. `git diff --check` and `compileall` pass.
+7. README, `docs/`, and this guide are updated if architecture or commands change.
+8. Packaging changes are tested by moving the build to another directory, starting it with a clean `PATH`, scanning, converting, and shutting down.

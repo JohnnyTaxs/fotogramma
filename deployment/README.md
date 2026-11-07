@@ -1,99 +1,86 @@
-# Build nativa e distribuzione
+# Native build and distribution
 
-La directory si chiama `deployment/` e non `packaging/` per evitare il conflitto con il pacchetto Python `packaging` richiesto da PyInstaller.
+The directory is named `deployment/` rather than `packaging/` to avoid a conflict with the Python `packaging` package required by PyInstaller.
 
-## Requisiti
+## Requirements
 
-Per compilare:
+For building:
 
-- Python 3.13 consigliato;
+- Python 3.13 recommended;
 - `uv`;
-- PySide6 Essentials e PyInstaller scaricati dall’ambiente temporaneo;
-- su macOS, `ffprobe` installato con Homebrew e gli strumenti Xcode per `otool`;
-- su Windows/Linux, accesso di rete per scaricare la build statica di `ffprobe`.
+- PySide6 Essentials and PyInstaller downloaded in a temporary environment;
+- on macOS, `ffprobe` installed through Homebrew and Xcode tools for `otool`;
+- on Windows and Linux, network access to download static FFmpeg builds.
 
-Sul computer di destinazione non serve nulla di tutto questo.
+None of these are required on the destination computer.
 
-## Compilare
+## Build
 
-Dalla radice del progetto, sul sistema di destinazione:
+From the project root, on the target operating system:
 
 ```bash
 uv run --no-project --with pyside6-essentials --with pyinstaller==6.22.3 \
   python deployment/build.py
 ```
 
-Il comando prepara `ffprobe`, esegue PyInstaller e genera:
+The command prepares `ffprobe`, runs PyInstaller, and produces:
 
-- `Fotogramma.app` su macOS;
-- `dist/Fotogramma/` su Windows e Linux;
-- `dist/Fotogramma-<OS>-<arch>.zip` per il trasporto.
+- `Fotogramma.app` on macOS;
+- `dist/Fotogramma/` on Windows and Linux;
+- `dist/Fotogramma-<OS>-<arch>.zip` for transport.
 
-`build/`, `dist/` e `deployment/vendor/` sono ignorati da Git.
+`build/`, `dist/`, and `deployment/vendor/` are ignored by Git.
 
-## Contenuto
+## Contents
 
-La build **onedir** include Python, PySide6 Essentials, plugin Qt, font, licenze, `ffmpeg` e `ffprobe`. Non include browser o Qt WebEngine.
+The **onedir** build includes Python, PySide6 Essentials, Qt plugins, fonts, licenses, `ffmpeg`, and `ffprobe`. It does not include a browser or Qt WebEngine.
 
-`runtime.py` usa `sys._MEIPASS` per risolvere gli asset nel pacchetto spostabile. In modalità frozen, la ricerca di `ffprobe` preferisce sempre il binario incluso.
+`runtime.py` uses `sys._MEIPASS` to locate assets in the relocated package. In frozen mode, `ffprobe` resolution always prefers the binary included in the bundle.
 
-## ffmpeg e ffprobe per piattaforma
+## ffmpeg and ffprobe by platform
 
 ### macOS
 
 `deployment/prepare_ffprobe.py`:
 
-1. copia `ffmpeg` e `ffprobe` Homebrew usati per la build;
-2. legge le dipendenze con `otool -L`;
-3. copia ricorsivamente le dylib non di sistema in `lib/`;
-4. esegue entrambi i binari con `DYLD_LIBRARY_PATH` locale;
-5. verifica con `DYLD_PRINT_LIBRARIES` che nessuna libreria venga caricata da Homebrew.
+1. copies `ffmpeg` and `ffprobe` from the Homebrew installation used for the build;
+2. reads dependencies with `otool -L`;
+3. recursively copies non-system dylibs into `lib/`;
+4. runs both binaries with a local `DYLD_LIBRARY_PATH`;
+5. verifies with `DYLD_PRINT_LIBRARIES` that no library is loaded from Homebrew.
 
-Il file `deployment/vendor/<OS>-<arch>/manifest.json` include SHA-256 e dimensione dei file raccolti.
+`deployment/vendor/<OS>-<arch>/manifest.json` records the SHA-256 and size of every collected file.
 
-### Windows e Linux
+### Windows and Linux
 
-Il downloader estrae `ffmpeg` e `ffprobe` (o i rispettivi `.exe`) dagli archivi statici gyan.dev e johnvansickle.com. Non estrae directory complete e non usa percorsi dell’archivio per scrivere fuori dalla cartella vendor.
+The downloader extracts `ffmpeg` and `ffprobe` (or the corresponding `.exe` files) from the static gyan.dev and johnvansickle.com archives. It does not extract complete directories and never uses an archive path to write outside the vendor folder.
 
-## Verifica della build
+## Verification
 
 ```bash
-# Avvio della GUI
-Fotogramma --directory /percorso/fixture --scan-on-start --smoke-test
+# Start the GUI
+Fotogramma --directory /path/to/fixtures --scan-on-start --smoke-test
 
-# macOS, percorso esplicito
+# Explicit macOS path
 Fotogramma.app/Contents/MacOS/Fotogramma \
-  --directory /percorso/fixture --scan-on-start --smoke-test
+  --directory /path/to/fixtures --scan-on-start --smoke-test
 ```
 
-La modalità smoke test si chiude da sola dopo l’avvio o dopo il completamento della scansione.
+Smoke-test mode closes automatically after startup or after the scan completes.
 
-Prima del rilascio:
+Before release:
 
-1. estrarre lo ZIP in una nuova cartella;
-2. avviare con `PATH=/usr/bin:/bin`;
-3. verificare apertura, font e scansione completa;
-4. estrarre nuovamente lo ZIP altrove e ripetere la prova;
-5. verificare che nessuna libreria nativa esterna venga caricata.
+1. Extract the ZIP in a new directory.
+2. Start with `PATH=/usr/bin:/bin`.
+3. Verify startup, fonts, and a complete scan.
+4. Extract the ZIP again elsewhere and repeat.
+5. Verify that no external native libraries are loaded.
+6. Convert a short H.264 with the bundled `ffmpeg` and confirm `hevc` with the bundled `ffprobe`.
 
-La build `Fotogramma-Darwin-arm64.zip` è stata verificata con questo flusso. Windows e Linux richiedono prove sui rispettivi sistemi.
+For verified replacement, use only temporary copies of fixtures. Confirm that codec, duration, streams, and full decode are validated before renaming, and that the `.fotogramma-backup` is deleted only after success. Simulate a failed test to confirm that the original is preserved.
 
-## Verifica della conversione frozen
+The `Fotogramma-Darwin-arm64.zip` build has been verified with this workflow. Windows and Linux require the same verification on their own systems.
 
-Oltre all’avvio della GUI, verificare i binari inclusi:
+## Signing
 
-```bash
-# macOS
-Fotogramma.app/Contents/Frameworks/ffmpeg -version
-Fotogramma.app/Contents/Frameworks/ffprobe -version
-```
-
-Eseguire una breve conversione con l’`ffmpeg` incluso e controllare con il `ffprobe` incluso che il codec risultante sia `hevc`. Il file originale deve restare invariato e l’output deve usare il suffisso `.h265`.
-
-La build `Fotogramma-Darwin-arm64.zip` è stata verificata con questo flusso. Windows e Linux richiedono prove sui rispettivi sistemi.
-
-Per la sostituzione dopo verifica, usare esclusivamente copie temporanee dei fixture. Controllare che codec, durata, stream e decodifica completa vengano validati prima della rinomina e che il backup `.fotogramma-backup` venga eliminato solo dopo esito positivo. Simulare anche un test fallito per confermare che l’originale resti invariato.
-
-## Firma
-
-La build macOS è firmata ad hoc ma non notarizzata. Al primo avvio usare tasto destro → Apri. Per una distribuzione pubblica senza avvisi servono certificato Developer ID e notarizzazione. Anche Windows SmartScreen può richiedere una strategia di code signing.
+The macOS build is ad-hoc signed but not notarized. Use right-click → Open on first launch. Public distribution without warnings requires a Developer ID certificate and Apple notarization. Windows SmartScreen may also require a code-signing strategy.
