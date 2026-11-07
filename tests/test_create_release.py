@@ -32,10 +32,20 @@ class ReleaseHandler(BaseHTTPRequestHandler):
                 self.send_error(422, "Already exists")
                 return
             payload = json.loads(body)
-            self.__class__.release = {"id": 42, "tag_name": payload["tag_name"], "html_url": "https://github.com/JohnnyTaxs/fotogramma/releases/tag/v1.0.0", "assets": []}
+            upload_url = (
+                f"http://127.0.0.1:{self.server.server_address[1]}"
+                "/uploads/repos/JohnnyTax/fotogramma-desktop/releases/42/assets{?name,label}"
+            )
+            self.__class__.release = {
+                "id": 42,
+                "tag_name": payload["tag_name"],
+                "html_url": "https://github.com/JohnnyTaxs/fotogramma/releases/tag/v1.0.0",
+                "upload_url": upload_url,
+                "assets": [],
+            }
             self._json(201, self.release)
             return
-        if self.path.startswith("/api/v3/repos/JohnnyTax/fotogramma-desktop/releases/42/assets"):
+        if self.path.startswith("/uploads/repos/JohnnyTax/fotogramma-desktop/releases/42/assets"):
             name = parse_qs(urlsplit(self.path).query)["name"][0]
             asset = {"id": self.next_asset_id, "name": name, "size": len(body)}
             self.__class__.next_asset_id += 1

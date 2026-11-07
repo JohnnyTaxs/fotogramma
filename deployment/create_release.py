@@ -52,9 +52,13 @@ class ReleaseClient:
     def upload_asset(self, release: dict, path: Path) -> None:
         self.delete_asset_if_present(release, path.name)
         query = urllib.parse.urlencode({"name": path.name})
+        upload_url = release.get(
+            "upload_url",
+            f"{self.api_url}/repos/{self.repository}/releases/{release['id']}/assets",
+        ).split("{", 1)[0]
         self.request(
             "POST",
-            f"/repos/{self.repository}/releases/{release['id']}/assets?{query}",
+            f"{upload_url}?{query}",
             path.read_bytes(),
             content_type="application/zip",
         )
@@ -62,25 +66,25 @@ class ReleaseClient:
 
 def main() -> int:
     if len(sys.argv) != 2:
-        raise SystemExit("Uso: python deployment/create_release.py <directory-asset>")
+        raise SystemExit("Usage: python deployment/create_release.py <asset-directory>")
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("FORGEJO_TOKEN")
     if not token:
-        raise SystemExit("GITHUB_TOKEN o FORGEJO_TOKEN mancante")
+        raise SystemExit("GITHUB_TOKEN or FORGEJO_TOKEN is missing")
     repository = os.environ.get("GITHUB_REPOSITORY")
     api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
     tag = os.environ.get("GITHUB_REF_NAME")
     if not repository or not tag:
-        raise SystemExit("GITHUB_REPOSITORY e GITHUB_REF_NAME sono obbligatori")
+        raise SystemExit("GITHUB_REPOSITORY and GITHUB_REF_NAME are required")
 
     assets = sorted(Path(sys.argv[1]).glob("*.zip"))
     if not assets:
-        raise SystemExit("Nessun archivio ZIP da pubblicare")
+        raise SystemExit("No ZIP archives to publish")
     client = ReleaseClient(api_url, repository, token)
     release = client.create_release(tag)
     for asset in assets:
         client.upload_asset(release, asset)
-        print(f"Caricato: {asset.name}")
-    print(f"Release aggiornata: {release.get('html_url', release.get('url', tag))}")
+        print(f"Uploaded: {asset.name}")
+    print(f"Release updated: {release.get('html_url', release.get('url', tag))}")
     return 0
 
 

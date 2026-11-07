@@ -17,7 +17,7 @@ Linux uses Debian with system Python and PySide6 installed through `apt`. Window
 Each build job performs:
 
 1. `actions/checkout@v4`
-2. Linux: `apt-get install python3 python3-pip libgl1 libegl1 libgl1-mesa-dri libxkbcommon0` followed by `python3 -m pip install --break-system-packages pyside6-essentials`; Windows/macOS: `actions/setup-python@v5` and `astral-sh/setup-uv@v5`
+2. Linux: `apt-get` installs Python, pip, and the OpenGL, D-Bus, font, GLib, X11/XCB, and xkbcommon runtime libraries listed in the workflow, followed by `python3 -m pip install --break-system-packages pyside6-essentials`; Windows/macOS: `actions/setup-python@v5` and `astral-sh/setup-uv@v5`
 3. FFmpeg installation through Homebrew only on macOS ARM
 4. All `unittest` tests with Qt `offscreen`
 5. `deployment/build.py`
@@ -50,7 +50,7 @@ The script uses the GitHub API directly:
 - `POST /repos/{owner}/{repo}/releases` to create a release;
 - `GET /repos/{owner}/{repo}/releases/tags/{tag}` when it already exists;
 - deletion of an existing asset with the same name before re-uploading, making reruns idempotent;
-- upload of every ZIP with `Content-Type: application/zip`.
+- upload of every ZIP with `Content-Type: application/zip` through the release's dedicated `upload_url` endpoint.
 
 There are no release actions tied to another hosting provider: `GITHUB_API_URL` comes from the GitHub Actions context (`github.api_url`).
 

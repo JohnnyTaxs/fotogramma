@@ -81,7 +81,7 @@ The table uses native header sorting, not HTML pagination. For new columns updat
 
 ## CI/CD and releases
 
-The workflow lives at `.github/workflows/build-release.yml` and runs tests and builds on Linux (`ubuntu-latest` with `node:22-bookworm`), Windows (`windows-latest`), and macOS ARM (`macos-15`). Do not add macOS Intel or Forgejo-specific runner configuration. On Linux, install PySide6 Essentials with pip, not the unavailable `python3-pyside6` apt package; also install `libgl1`, `libegl1`, `libgl1-mesa-dri`, and `libxkbcommon0` for offscreen Qt.
+The workflow lives at `.github/workflows/build-release.yml` and runs tests and builds on Linux (`ubuntu-latest` with `node:22-bookworm`), Windows (`windows-latest`), and macOS ARM (`macos-15`). Do not add macOS Intel or Forgejo-specific runner configuration. On Linux, install PySide6 Essentials with pip, not the unavailable `python3-pyside6` apt package; also install the OpenGL, D-Bus, font, GLib, X11/XCB, and xkbcommon runtime packages listed in the workflow for offscreen and XCB Qt.
 
 `deployment/create_release.py` publishes or updates a GitHub release through `GITHUB_API_URL` and `GITHUB_REPOSITORY`, replacing same-name assets instead of duplicating them. Never print `GITHUB_TOKEN` or `FORGEJO_TOKEN`.
 
