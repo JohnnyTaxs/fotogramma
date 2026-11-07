@@ -36,7 +36,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config nasm patchelf libx265-dev \
-            libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxi-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libgl1-mesa-dri \
+            mesa-vulkan-drivers libx11-dev libxi-dev \
             libxkbcommon-dev libwayland-dev libxrandr-dev libxcursor-dev \
             libxinerama-dev
 
@@ -69,6 +70,15 @@ jobs:
           env -i PATH=/usr/bin:/bin \
             FOTOGRAMMA_FFMPEG_DIR="$PWD/dist/Fotogramma/bin" \
             rust/target/release/examples/scan /tmp/fotogramma-media
+
+      - name: Upload snapshot failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshots-linux
+          path: rust/crates/app/tests/snapshots/*.png
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
@@ -126,6 +136,15 @@ jobs:
             FOTOGRAMMA_FFMPEG_DIR="$PWD/dist/Fotogramma.app/Contents/Resources/bin" \
             rust/target/release/examples/scan /tmp/fotogramma-media
 
+      - name: Upload snapshot failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshots-macos
+          path: rust/crates/app/tests/snapshots/*.png
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
         with:
@@ -172,6 +191,15 @@ jobs:
 
       - name: Build portable app
         run: python deployment/build_rust.py
+
+      - name: Upload snapshot failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshots-windows
+          path: rust/crates/app/tests/snapshots/*.png
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v4

@@ -1,0 +1,9 @@
+# egui_kittest snapshot tolerance.
+#
+# The four snapshots are rendered by wgpu, whose antialiasing differs
+# slightly between GPUs and runner images. A handful of edge pixels may
+# therefore differ even when the layout is identical; a real layout change
+# moves far more than this budget (the window is about one million pixels).
+output_path = "tests/snapshots"
+threshold = 0.6
+max_failed_pixels = 2000

@@ -102,7 +102,8 @@ def main() -> int:
     for binary in binaries:
         shutil.copy2(binary, destination / "bin" / binary.name)
 
-    for name, path in collect_shared_objects(prefix / "lib", destination).items():
+    collected = collect_shared_objects(prefix / "lib", destination)
+    for name, path in collected.items():
         shutil.copy2(path, destination / "lib" / name)
 
     # Rewrite the runpath on every collected file so no build prefix leaks

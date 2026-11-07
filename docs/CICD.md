@@ -18,7 +18,7 @@ The workflow `.github/workflows/build-release.yml` runs on every push to `main` 
 2. `dtolnay/rust-toolchain@stable`.
 3. `Swatinem/rust-cache@v2` for the workspace.
 4. Platform build dependencies:
-   - Linux: `build-essential`, `pkg-config`, `nasm`, `patchelf`, `libx265-dev`, OpenGL, X11, xkbcommon, and Wayland development packages.
+   - Linux: `build-essential`, `pkg-config`, `nasm`, `patchelf`, `libx265-dev`, OpenGL, Mesa drivers (for the headless wgpu snapshots), X11, xkbcommon, and Wayland development packages.
    - macOS ARM: `x265` and `pkgconf` through Homebrew.
    - Windows: MSYS2 with `mingw-w64-x86_64-toolchain`, `nasm`, `pkgconf`, and `x265`.
 5. `deployment/ffmpeg/build_minimal.sh` (or `build_minimal_windows.sh`) downloads FFmpeg 9.0.2, configures the minimal component list, builds it, and collects the relocatable toolchain into `deployment/vendor/rust/<System>-<arch>/`.
