@@ -7,3 +7,4 @@ dist/
 deployment/vendor/
 fotogramma-da-convertire.txt
 .DS_Store
+rust/target/
