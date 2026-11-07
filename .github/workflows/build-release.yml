@@ -110,10 +110,10 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      - name: Install Python for release
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends python3
+      - name: Setup Python for release
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
 
       - name: Create or update GitHub release
         env:

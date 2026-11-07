@@ -43,7 +43,7 @@ For private repositories, GitHub provides limited monthly compute and artifact s
 
 ## Automatic releases
 
-The `release` job runs only for `refs/tags/` after all build jobs succeed. It downloads all artifacts and invokes `deployment/create_release.py`.
+The `release` job runs only for `refs/tags/` after all build jobs succeed. It downloads all artifacts, configures Python with `actions/setup-python@v5`, and invokes `deployment/create_release.py`; no privileged package installation is required.
 
 The script uses the GitHub API directly:
 
