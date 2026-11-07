@@ -174,7 +174,7 @@ class DiscoveryTests(unittest.TestCase):
             "/library", on_error=lambda path, message: warnings.append((path, message))
         )
         self.assertEqual(found, [os.path.join("/library", "movie.mp4")])
-        self.assertEqual(warnings, [(nested, "Permission denied")])
+        self.assertEqual(warnings, [(os.path.normcase(os.path.abspath(nested)), "Permission denied")])
 
 
 class SummaryTests(unittest.TestCase):
@@ -219,7 +219,7 @@ class ScanManagerTests(unittest.TestCase):
                 snapshot = manager.get(scan_id)["scan"]
 
             self.assertEqual(snapshot["status"], "complete")
-            self.assertEqual(snapshot["directory"], root)
+            self.assertEqual(os.path.normcase(snapshot["directory"]), os.path.normcase(os.path.abspath(root)))
             self.assertEqual(snapshot["summary"]["to_convert"], 1)
             self.assertEqual(snapshot["videos"][0]["relative_path"], "movie.mp4")
 

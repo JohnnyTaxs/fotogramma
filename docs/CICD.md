@@ -17,7 +17,7 @@ Linux uses Debian with system Python and PySide6 installed through `apt`. Window
 Each build job performs:
 
 1. `actions/checkout@v4`
-2. Linux: `apt-get install python3 python3-pip python3-pyside6`; Windows/macOS: `actions/setup-python@v5` and `astral-sh/setup-uv@v5`
+2. Linux: `apt-get install python3 python3-pip` followed by `python3 -m pip install --break-system-packages pyside6-essentials`; Windows/macOS: `actions/setup-python@v5` and `astral-sh/setup-uv@v5`
 3. FFmpeg installation through Homebrew only on macOS ARM
 4. All `unittest` tests with Qt `offscreen`
 5. `deployment/build.py`

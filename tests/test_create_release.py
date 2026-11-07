@@ -90,6 +90,8 @@ class CreateReleaseTests(unittest.TestCase):
                 "GITHUB_API_URL": f"http://127.0.0.1:{self.port}/api/v3",
                 "GITHUB_REPOSITORY": "JohnnyTax/fotogramma-desktop",
                 "GITHUB_REF_NAME": "v1.0.0",
+                "NO_PROXY": "127.0.0.1,localhost",
+                "no_proxy": "127.0.0.1,localhost",
             }
             with patch.dict(os.environ, env, clear=True), patch.object(sys, "argv", ["create_release.py", directory]):
                 output = io.StringIO()

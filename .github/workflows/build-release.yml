@@ -26,7 +26,8 @@ jobs:
       - name: Install Python and Qt
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends python3 python3-pip python3-pyside6
+          apt-get install -y --no-install-recommends python3 python3-pip
+          python3 -m pip install --break-system-packages pyside6-essentials
 
       - name: Run tests
         run: python3 -m unittest discover -s tests -q
