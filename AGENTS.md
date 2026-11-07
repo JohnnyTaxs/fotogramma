@@ -5,7 +5,7 @@ Regole per agenti che modificano **Fotogramma Desktop**, il Progetto 2 nativo. L
 ## Invarianti
 
 - **Solo widget Qt nativi** tramite PySide6 Essentials. Niente server HTTP, Electron, Tauri o Qt WebEngine. Il browser esterno è ammesso solo per aprire la ricerca 1337x.to richiesta dall’utente.
-- **Gli originali non vengono mai sovrascritti.** La conversione crea nuovi file `.h265` con output progressivo e `ffmpeg -n`.
+- **La modalità predefinita non sovrascrive gli originali.** La sostituzione è consentita solo dopo validazione HEVC, durata, stream, decodifica completa e backup atomico con ripristino in caso di errore.
 - `hevc` e `av1` sono `compatible`; gli altri codec validi sono `convert`; i problemi di lettura sono `error`.
 - Analisi del solo primo stream video (`v:0`) di `.mp4`, `.mkv` e `.webm`.
 - Nessuna dipendenza CDN o servizio online a runtime.
@@ -45,6 +45,7 @@ Non installare il pacchetto completo `PySide6`: include WebEngine e altre dipend
 | `fotogramma/core/conversion.py` | Profili e argomenti FFmpeg. Usare `-n`, `-map 0` e output senza sovrascrittura. |
 | `fotogramma/core/media_tools.py` | Risoluzione di ffmpeg in sviluppo e frozen. |
 | `fotogramma/core/search.py` | Solo URL esterno 1337x.to; nessuna richiesta di rete integrata. |
+| `fotogramma/core/verification.py` | Validazione codec/durata/stream, decodifica completa e sostituzione atomica con backup. |
 | `fotogramma/ui/conversion_dialog.py` | Profili, anteprima comando e avanzamento. Mantieni controlli nel GUI thread. |
 | `fotogramma/ui/models.py` | Modello/proxy per grandi librerie, ruoli custom e badge. |
 | `fotogramma/ui/theme.py` | QSS Cinema Pop; non introdurre HTML/CSS o un secondo tema. |
@@ -61,6 +62,7 @@ Il flusso è: directory → `discover_videos` → `probe_videos` → segnali Qt 
 - In `closeEvent`, se il job è attivo, chiedi conferma e attendi la terminazione del worker prima di accettare la chiusura.
 - `ConversionWorker` usa `-progress pipe:1` e `stderr=STDOUT` per evitare deadlock; chiudi sempre `process.stdout` dopo `wait()`.
 - Non lanciare più conversioni parallele: la coda sequenziale riduce saturazione di disco e CPU. `fileStarted`, `progress`, `fileCompleted` e `conversionCompleted` aggiornano la UI solo via segnali.
+- La sostituzione usa sempre `allocate_partial_path`, `validate_conversion_output` e `replace_verified_output`. Non rinominare l’originale prima di questi passaggi e non eliminare il backup prima del controllo finale. WebM non è supportato per la sostituzione.
 - Non chiamare metodi Qt GUI da test worker eseguiti senza `QApplication` quando usi widget o `QPixmap`; i test GUI usano `QT_QPA_PLATFORM=offscreen`.
 
 ## Contratto del modello
@@ -76,6 +78,14 @@ La tabella usa ordinamento nativo degli header, non paginazione HTML. Per nuove 
 - `deployment/prepare_ffprobe.py` verifica con `DYLD_PRINT_LIBRARIES` che nessuna libreria Homebrew venga caricata da `ffmpeg` o `ffprobe`.
 - Windows/Linux scaricano entrambi i binari dagli archivi statici senza estrarre percorsi arbitrari.
 - Non committare `build/`, `dist/`, `deployment/vendor/`, `.venv/` o screenshot con dati reali.
+
+## CI/CD e release
+
+Il workflow `.forgejo/workflows/build-release.yml` esegue test e build su Linux, Windows e macOS ARM (`macos-15`). Non aggiungere macOS Intel senza una decisione esplicita.
+
+`deployment/create_release.py` pubblica o aggiorna la release tramite `GITHUB_API_URL` e `GITHUB_REPOSITORY`, senza action di release GitHub-specifiche. In caso di rerun deve sostituire gli asset omonimi, non duplicarli. Non stampare mai `GITHUB_TOKEN` o `FORGEJO_TOKEN`.
+
+Dopo modifiche al workflow o al client di release eseguire `tests.test_create_release`. I tag di release usano SemVer (`v1.0.0`).
 
 ## Checklist
 

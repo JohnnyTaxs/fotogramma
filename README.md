@@ -18,7 +18,7 @@ Fotogramma Desktop è la versione **nativa** di Fotogramma: una vera applicazion
 - Esportazione dell’elenco tramite `QFileDialog`.
 - Tema Cinema Pop con font Sora e IBM Plex Mono inclusi.
 
-**Gli originali non vengono mai sovrascritti.** Le conversioni creano nuovi file `.h265.mkv` o `.h265.mp4`; se il nome esiste già, viene aggiunto un numero progressivo.
+**La modalità predefinita non sovrascrive gli originali.** Le conversioni creano nuovi file `.h265.mkv` o `.h265.mp4`; se il nome esiste già, viene aggiunto un numero progressivo. La sostituzione dell’originale è opzionale e avviene solo dopo una verifica completa del risultato.
 
 ## Conversione diretta
 
@@ -30,15 +30,26 @@ Seleziona uno o più video da convertire e scegli **Converti selezionati**. La f
 
 | Profilo | Uso consigliato | Video | Audio predefinito |
 | --- | --- | --- | --- |
-| Film e serie TV · Bilanciato | Conversioni generali | CRF 22, preset medium, 10-bit | Originale |
-| Alta qualità · Film | Dettaglio superiore e file più grandi | CRF 20, preset slow, 10-bit | Originale |
-| Anime · gradienti e linee | Animazione, banding e linee sottili | CRF 23, preset slow, tune animation, AQ mode 3 | Originale |
-| Leggero · spazio ridotto | Archivi più piccoli | CRF 26, preset medium, 10-bit | Originale |
+| Massima qualità e compressione | Miglior rapporto qualità/dimensione, anche se lento | CRF 20, preset veryslow, AQ mode 3, 10-bit | Originale |
+| Intermedio · buona qualità | Equilibrio tra qualità, spazio e tempo | CRF 22, preset medium, 10-bit | Originale |
+| Veloce · transcode rapido | Massima velocità disponibile | CRF 26, preset ultrafast, 8-bit | Originale |
 | Personalizzato | Controllo manuale | CRF, preset, pixel format, tune e AQ mode | Originale o AAC |
 
 L’audio può essere mantenuto originale oppure convertito in **AAC 128/160/256 kbps**. Tutti gli stream vengono mappati con `-map 0`, mantenendo tracce audio, sottotitoli, capitoli e metadati compatibili con il contenitore scelto.
 
 Il contenitore **MKV** è consigliato per la massima compatibilità degli stream; **MP4** aggiunge `+faststart` per la riproduzione progressiva.
+
+## Sostituzione dell’originale dopo verifica
+
+L’opzione **Sostituisci gli originali solo dopo verifica completa** è disattivata di default. Se viene attivata, Fotogramma lavora su file `.partial` nella stessa directory degli originali e sostituisce ciascun file soltanto dopo questi controlli:
+
+1. Codec di output realmente HEVC.
+2. Durata coerente con l’originale entro l’1% o 1 secondo.
+3. Stesso numero e tipo di stream audio, video, sottotitoli e dati.
+4. Decodifica completa del risultato tramite `ffmpeg -v error -i output -f null -` senza errori.
+5. Controllo finale del file sostituito prima di eliminare il backup temporaneo.
+
+Se un controllo fallisce, l’originale non viene modificato. La sostituzione usa rinomina atomica sulla stessa filesystem e un backup `.fotogramma-backup` che viene eliminato solo dopo esito positivo. Per MKV e MP4 il contenitore resta coerente con l’estensione originale; la sostituzione non è disponibile per WebM.
 
 ## Ricerca online
 
@@ -108,7 +119,15 @@ FOTOGRAMMA_DEMO_DIR=/percorso/fixture QT_QPA_PLATFORM=offscreen \
   python -m unittest discover -s tests -v
 ```
 
-La suite attuale contiene **30 test** per motore, modelli Qt, finestra, worker, profili, ricerca online e conversione HEVC reale.
+La suite attuale contiene **35 test** per motore, modelli Qt, finestra, worker, profili, ricerca online, conversione HEVC reale, validazione completa e ripristino del backup.
+
+## CI/CD e release
+
+![Build & Release](https://git.local.tassoni.net/JohnnyTax/fotogramma-desktop/actions/workflows/build-release.yml/badge.svg)
+
+La pipeline Forgejo esegue test e build su **Linux, Windows e macOS ARM**. macOS Intel è escluso. Su ogni tag `v*` pubblica o aggiorna automaticamente una release con tutti gli ZIP portabili.
+
+Dettagli e requisiti dei runner: [CI/CD su Forgejo](docs/CICD.md).
 
 ## Build
 
@@ -127,6 +146,7 @@ fotogramma/
   core/scanner.py        Discovery, ffprobe, classificazione e cancellazione
   core/media_tools.py    Percorso di ffmpeg in sviluppo e frozen
   core/conversion.py     Profili, argomenti FFmpeg e output senza sovrascrittura
+  core/verification.py   Validazione completa e sostituzione atomica con backup
   core/search.py         Pulizia titolo e URL esterno 1337x.to
   ui/main_window.py      Finestra e azioni di selezione
   ui/conversion_dialog.py Profili e avanzamento conversione
@@ -145,6 +165,7 @@ docs/                    Architettura e asset dimostrativi
 
 - [Architettura](docs/ARCHITECTURE.md)
 - [Build e distribuzione](deployment/README.md)
+- [CI/CD su Forgejo](docs/CICD.md)
 - [Guida per agenti](AGENTS.md)
 
 ## Privacy e licenze

@@ -92,6 +92,8 @@ Eseguire una breve conversione con l’`ffmpeg` incluso e controllare con il `ff
 
 La build `Fotogramma-Darwin-arm64.zip` è stata verificata con questo flusso. Windows e Linux richiedono prove sui rispettivi sistemi.
 
+Per la sostituzione dopo verifica, usare esclusivamente copie temporanee dei fixture. Controllare che codec, durata, stream e decodifica completa vengano validati prima della rinomina e che il backup `.fotogramma-backup` venga eliminato solo dopo esito positivo. Simulare anche un test fallito per confermare che l’originale resti invariato.
+
 ## Firma
 
 La build macOS è firmata ad hoc ma non notarizzata. Al primo avvio usare tasto destro → Apri. Per una distribuzione pubblica senza avvisi servono certificato Developer ID e notarizzazione. Anche Windows SmartScreen può richiedere una strategia di code signing.

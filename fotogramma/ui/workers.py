@@ -9,9 +9,10 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QThread, Signal
 
-from fotogramma.core.conversion import allocate_output_path, build_ffmpeg_args
+from fotogramma.core.conversion import allocate_output_path, allocate_partial_path, build_ffmpeg_args
 from fotogramma.core.media_tools import get_ffmpeg_path
 from fotogramma.core.scanner import discover_videos, ffprobe_environment, get_ffprobe_path, probe_videos
+from fotogramma.core.verification import replace_verified_output, validate_conversion_output
 
 
 class ScanWorker(QThread):
@@ -70,21 +71,25 @@ class ConversionResult:
     success: bool
     message: str = ""
     cancelled: bool = False
+    verified: bool = False
+    replaced: bool = False
 
 
 class ConversionWorker(QThread):
     fileStarted = Signal(int, int, str, str)
     progress = Signal(int, int, int, str)
+    verificationStarted = Signal(int, str)
     fileCompleted = Signal(object)
     conversionCompleted = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, videos, profile, destination_dir: str, container: str = "mkv", parent=None) -> None:
+    def __init__(self, videos, profile, destination_dir: str, container: str = "mkv", replace_original: bool = False, parent=None) -> None:
         super().__init__(parent)
         self.videos = list(videos)
         self.profile = profile
         self.destination_dir = destination_dir
         self.container = container
+        self.replace_original = replace_original
         self.cancel_event = threading.Event()
 
     def run(self) -> None:
@@ -95,7 +100,15 @@ class ConversionWorker(QThread):
             for index, video in enumerate(self.videos, start=1):
                 if self.cancel_event.is_set():
                     break
-                destination = allocate_output_path(video.path, self.destination_dir, self.container)
+                if self.replace_original:
+                    try:
+                        destination = allocate_partial_path(video.path)
+                    except ValueError as exc:
+                        result = ConversionResult(video.path, video.path, False, str(exc))
+                        self.fileCompleted.emit(result)
+                        continue
+                else:
+                    destination = allocate_output_path(video.path, self.destination_dir, self.container)
                 self.fileStarted.emit(index, len(self.videos), video.path, str(destination))
                 result = self._convert_one(ffmpeg, video, destination, index, len(self.videos))
                 results.append(result)
@@ -145,6 +158,16 @@ class ConversionWorker(QThread):
             return ConversionResult(video.path, str(destination), False, message)
         if not destination.is_file() or destination.stat().st_size == 0:
             return ConversionResult(video.path, str(destination), False, "File di output non creato")
+        if self.replace_original:
+            self.verificationStarted.emit(file_index, video.relative_path)
+            ffprobe_bin = get_ffprobe_path()
+            valid, validation_message = validate_conversion_output(video, destination, ffprobe_bin)
+            if not valid:
+                return ConversionResult(video.path, str(destination), False, f"Originale non modificato: {validation_message}")
+            replaced, replacement_message = replace_verified_output(video.path, destination, ffprobe_bin)
+            if not replaced:
+                return ConversionResult(video.path, str(destination), False, replacement_message)
+            return ConversionResult(video.path, video.path, True, replacement_message, False, True, True)
         return ConversionResult(video.path, str(destination), True)
 
     def cancel(self) -> None:

@@ -8,6 +8,7 @@ import shlex
 from PySide6.QtCore import QUrl, Qt
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from fotogramma.core.conversion import PROFILES, allocate_output_path, build_ffmpeg_args, custom_profile
+from fotogramma.core.conversion import PROFILES, allocate_output_path, allocate_partial_path, build_ffmpeg_args, custom_profile
 from fotogramma.ui.workers import ConversionWorker
 
 
@@ -40,9 +41,9 @@ class ConversionDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(14)
 
-        count_label = QLabel(f"{len(videos)} file selezionati. Gli originali restano invariati.")
-        count_label.setStyleSheet("font-weight: 650;")
-        layout.addWidget(count_label)
+        self.count_label = QLabel(f"{len(videos)} file selezionati. Gli originali restano invariati.")
+        self.count_label.setStyleSheet("font-weight: 650;")
+        layout.addWidget(self.count_label)
 
         form = QFormLayout()
         self.profile_combo = QComboBox()
@@ -109,10 +110,16 @@ class ConversionDialog(QDialog):
         destination_layout = QHBoxLayout(destination_group)
         self.destination_edit = QLineEdit(self.destination_dir)
         destination_layout.addWidget(self.destination_edit, 1)
-        browse = QPushButton("Scegli…")
-        browse.clicked.connect(self._browse_destination)
-        destination_layout.addWidget(browse)
+        self.destination_browse = QPushButton("Scegli…")
+        self.destination_browse.clicked.connect(self._browse_destination)
+        destination_layout.addWidget(self.destination_browse)
         layout.addWidget(destination_group)
+        self.destination_group = destination_group
+
+        self.replace_checkbox = QCheckBox("Sostituisci gli originali solo dopo verifica completa")
+        self.replace_checkbox.setToolTip("Scrive prima un file temporaneo, esegue tutti i test e solo dopo sostituisce l’originale con backup di sicurezza")
+        self.replace_checkbox.toggled.connect(self._replacement_changed)
+        layout.addWidget(self.replace_checkbox)
 
         preview_label = QLabel("Anteprima del comando FFmpeg")
         preview_label.setStyleSheet("font-weight: 650;")
@@ -158,10 +165,19 @@ class ConversionDialog(QDialog):
         self.profile = profile
         self.container = self.container_combo.currentData()
         self.destination_dir = self.destination_edit.text()
-        if not self.destination_dir.strip():
-            self.preview.setPlainText("Scegli una cartella di destinazione.")
+        replacing = self.replace_checkbox.isChecked()
+        self.replace_original = replacing
+        if replacing and Path(self.videos[0].path).suffix.lower() not in {".mkv", ".mp4"}:
+            self.preview.setPlainText("La sostituzione dell’originale è disponibile solo per MKV e MP4.")
             return
-        destination = allocate_output_path(self.videos[0].path, self.destination_dir, self.container)
+        if replacing:
+            self.container = Path(self.videos[0].path).suffix.lower().lstrip(".")
+            destination = allocate_partial_path(self.videos[0].path)
+        else:
+            if not self.destination_dir.strip():
+                self.preview.setPlainText("Scegli una cartella di destinazione.")
+                return
+            destination = allocate_output_path(self.videos[0].path, self.destination_dir, self.container)
         args = build_ffmpeg_args(profile, self.videos[0].path, str(destination))
         self.preview.setPlainText(shlex.join(["ffmpeg", *args]))
 
@@ -180,6 +196,23 @@ class ConversionDialog(QDialog):
             audio_data if audio_data != "copy" else 160,
         )
 
+    def _replacement_changed(self, checked: bool) -> None:
+        self.count_label.setText(
+            f"{len(self.videos)} file. Gli originali saranno sostituiti solo dopo test completi."
+            if checked
+            else f"{len(self.videos)} file selezionati. Gli originali restano invariati."
+        )
+        self.destination_edit.setDisabled(checked)
+        self.destination_browse.setDisabled(checked)
+        self.container_combo.setDisabled(checked)
+        if checked:
+            container = Path(self.videos[0].path).suffix.lower().lstrip(".")
+            self.container_combo.setCurrentIndex(self.container_combo.findData(container))
+        self.destination_group.setTitle(
+            "Sostituzione solo dopo test completi" if checked else "Destinazione · mai sovrascrivere"
+        )
+        self._update_preview()
+
     def _browse_destination(self) -> None:
         selected = QFileDialog.getExistingDirectory(self, "Cartella di destinazione", self.destination_edit.text())
         if selected:
@@ -187,12 +220,12 @@ class ConversionDialog(QDialog):
 
 
 class ConversionProgressDialog(QDialog):
-    def __init__(self, videos, profile, destination_dir: str, container: str, parent=None) -> None:
+    def __init__(self, videos, profile, destination_dir: str, container: str, replace_original: bool = False, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Conversione in corso")
         self.setMinimumWidth(680)
         self.destination_dir = destination_dir
-        self.worker = ConversionWorker(videos, profile, destination_dir, container, self)
+        self.worker = ConversionWorker(videos, profile, destination_dir, container, replace_original=replace_original, parent=self)
         self.finished = False
         self.results = []
 
@@ -226,6 +259,7 @@ class ConversionProgressDialog(QDialog):
 
         self.worker.fileStarted.connect(self._file_started)
         self.worker.progress.connect(self._progress)
+        self.worker.verificationStarted.connect(self._verification_started)
         self.worker.fileCompleted.connect(self._file_completed)
         self.worker.conversionCompleted.connect(self._completed)
         self.worker.failed.connect(self._failed)
@@ -241,9 +275,15 @@ class ConversionProgressDialog(QDialog):
         self.progress_bar.setValue(percent)
         self.label.setText(f"{Path(current_file).name} · {percent}%")
 
+    def _verification_started(self, _index: int, current_file: str) -> None:
+        self.label.setText(f"Verifica completa: {Path(current_file).name}")
+        self.log.appendPlainText("Verifica completa prima della sostituzione…")
+
     def _file_completed(self, result) -> None:
         self.results.append(result)
-        if result.success:
+        if result.verified:
+            self.log.appendPlainText("Verifica superata ✓ · originale sostituito")
+        elif result.success:
             self.log.appendPlainText("Completato ✓")
         else:
             self.log.appendPlainText(f"Errore: {result.message}")
@@ -252,7 +292,11 @@ class ConversionProgressDialog(QDialog):
         self.finished = True
         successes = sum(result.success for result in results)
         errors = len(results) - successes
-        self.label.setText(f"Conversione terminata: {successes} riuscite, {errors} errori")
+        replacements = sum(result.replaced for result in results)
+        summary = f"Conversione terminata: {successes} riuscite, {errors} errori"
+        if replacements:
+            summary += f" · {replacements} originali sostituiti dopo verifica"
+        self.label.setText(summary)
         self.progress_bar.setValue(100)
         self.cancel_button.setVisible(False)
         self.done_button.setEnabled(True)

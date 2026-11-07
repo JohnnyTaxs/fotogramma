@@ -21,35 +21,28 @@ class ConversionProfile:
 
 
 PROFILES = {
+    "max_quality": ConversionProfile(
+        "max_quality",
+        "Massima qualità e compressione",
+        "Il miglior rapporto qualità/dimensione, senza fretta: CRF 20, preset veryslow e AQ mode 3.",
+        crf=20,
+        preset="veryslow",
+        aq_mode=3,
+    ),
     "balanced": ConversionProfile(
         "balanced",
-        "Film e serie TV · Bilanciato",
-        "Qualità elevata e dimensioni contenute. Video 10-bit, audio originale.",
+        "Intermedio · buona qualità",
+        "Buon equilibrio tra qualità, spazio e tempo: CRF 22 e preset medium.",
         crf=22,
         preset="medium",
     ),
-    "quality": ConversionProfile(
-        "quality",
-        "Alta qualità · Film",
-        "Più dettaglio e file più grandi. Video 10-bit, audio originale.",
-        crf=20,
-        preset="slow",
-    ),
-    "anime": ConversionProfile(
-        "anime",
-        "Anime · gradienti e linee",
-        "Preset animation e AQ mode 3 per ridurre banding e artefatti.",
-        crf=23,
-        preset="slow",
-        tune="animation",
-        aq_mode=3,
-    ),
-    "light": ConversionProfile(
-        "light",
-        "Leggero · spazio ridotto",
-        "Compressione più forte per archivi meno pesanti. Video 10-bit, audio originale.",
+    "fast": ConversionProfile(
+        "fast",
+        "Veloce · transcode rapido",
+        "Massima velocità disponibile: CRF 26, preset ultrafast e video 8-bit.",
         crf=26,
-        preset="medium",
+        preset="ultrafast",
+        pixel_format="yuv420p",
     ),
 }
 
@@ -121,5 +114,19 @@ def allocate_output_path(source: str, destination_dir: str, container: str = "mk
     counter = 1
     while candidate.exists():
         candidate = directory / f"{Path(source).stem} ({counter}){suffix}"
+        counter += 1
+    return candidate
+
+
+def allocate_partial_path(source: str) -> Path:
+    """Allocate a same-filesystem temporary path used only after full validation."""
+    original = Path(source)
+    if original.suffix.lower() not in {".mkv", ".mp4"}:
+        raise ValueError("La sostituzione è disponibile solo per file MKV e MP4")
+    suffix = original.suffix
+    candidate = original.with_name(f"{original.stem}.h265.partial{suffix}")
+    counter = 1
+    while candidate.exists():
+        candidate = original.with_name(f"{original.stem}.h265.partial-{counter}{suffix}")
         counter += 1
     return candidate

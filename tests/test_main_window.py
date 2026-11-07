@@ -101,13 +101,15 @@ class MainWindowTests(unittest.TestCase):
         try:
             self.assertIn("libx265", dialog.preview.toPlainText())
             self.assertIn("one.h265.mkv", dialog.preview.toPlainText())
-            anime_index = dialog.profile_combo.findData("anime")
-            dialog.profile_combo.setCurrentIndex(anime_index)
+            quality_index = dialog.profile_combo.findData("max_quality")
+            dialog.profile_combo.setCurrentIndex(quality_index)
             self.assertIn("aq-mode=3", dialog.preview.toPlainText())
-            self.assertIn("animation", dialog.preview.toPlainText())
+            self.assertIn("veryslow", dialog.preview.toPlainText())
             dialog.profile_combo.setCurrentIndex(dialog.profile_combo.findData("custom"))
             dialog.crf_spin.setValue(27)
             self.assertIn("27", dialog.preview.toPlainText())
+            dialog.replace_checkbox.setChecked(True)
+            self.assertIn("partial", dialog.preview.toPlainText())
         finally:
             dialog.deleteLater()
 

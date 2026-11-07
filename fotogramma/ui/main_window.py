@@ -542,7 +542,8 @@ class MainWindow(QMainWindow):
             dialog.profile,
             dialog.destination_dir,
             dialog.container,
-            self,
+            replace_original=dialog.replace_original,
+            parent=self,
         )
         progress.exec()
 

@@ -74,7 +74,16 @@ Il worker non tocca mai widget o modelli direttamente.
 - `+faststart` solo per MP4;
 - `-progress pipe:1` per il progresso nativo.
 
-`allocate_output_path()` aggiunge `.h265` al nome e un contatore progressivo se il file esiste già. L’originale resta intatto.
+`allocate_output_path()` aggiunge `.h265` al nome e un contatore progressivo se il file esiste già. L’originale resta intatto nella modalità predefinita.
+
+### `core/verification.py`
+
+La sostituzione opzionale usa due fasi separate:
+
+1. `validate_conversion_output()` verifica codec HEVC, durata entro max(1 secondo, 1%), stesso numero/tipo di stream e decodifica completa tramite `ffmpeg -v error -i output -f null -`.
+2. `replace_verified_output()` rinomina l’originale in `.fotogramma-backup`, sposta il `.partial` sul percorso originale, ricontrolla il codec e solo dopo elimina il backup.
+
+Se un test fallisce non avviene alcuna sostituzione. Se il controllo finale fallisce dopo la rinomina, il backup ripristina l’originale. `allocate_partial_path()` mantiene lo stesso contenitore di MKV/MP4 e rifiuta WebM.
 
 ### `core/search.py`
 
@@ -140,4 +149,5 @@ Il pacchetto può essere spostato. La verifica esegue la build estratta con `PAT
 - Test worker su cinque video reali opzionali tramite `FOTOGRAMMA_DEMO_DIR`.
 - Test di conversione reale di un breve H.264 con verifica `hevc`, originale invariato e nessuna sovrascrittura.
 - Test profili, argomenti AAC/faststart, selezione azioni, anteprima comando e URL di ricerca.
+- Test del client di release Forgejo con server HTTP locale per creazione, recupero e sostituzione asset, senza token nei log.
 - Screenshot nativi ottenuti con `QWidget.grab()`, senza browser o screenshot HTML.
