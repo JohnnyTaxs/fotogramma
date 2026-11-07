@@ -28,11 +28,11 @@ def download_media_tools(dest_dir: str) -> dict[str, Path]:
             arch = "amd64"
         else:
             arch = "i686"
-        url = f"https://johnvansickle.com/ffmpeg/ffmpeg-release-{arch}-static.tar.xz"
+        url = f"https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-{arch}-static.tar.xz"
         archive = destination / "ffmpeg.tar.xz"
         binary_names = ("ffmpeg", "ffprobe")
     else:
-        raise RuntimeError("Il download automatico è disponibile solo per Windows e Linux.")
+        raise RuntimeError("Automatic download is available only on Windows and Linux.")
 
     print(f"Downloading FFmpeg tools from {url} ...")
     outputs = {}
@@ -56,11 +56,11 @@ def download_media_tools(dest_dir: str) -> dict[str, Path]:
                     )
                     source = bundle.extractfile(member)
                     if source is None:
-                        raise RuntimeError(f"{binary_name} non trovato nell’archivio")
+                        raise RuntimeError(f"{binary_name} was not found in the archive")
                     with source, final_path.open("wb") as target:
                         shutil.copyfileobj(source, target)
             if final_path.stat().st_size < 1_000_000:
-                raise RuntimeError(f"Il binario {binary_name} non è valido")
+                raise RuntimeError(f"The {binary_name} binary is invalid")
             if system != "Windows":
                 final_path.chmod(0o755)
             outputs[Path(binary_name).stem] = final_path
