@@ -2,7 +2,7 @@
 
 Fotogramma is a **native desktop application** for inspecting a video library, identifying files that may benefit from H.265 conversion, searching for an existing H.265 version online, and converting videos directly with FFmpeg.
 
-It is built with **PySide6/Qt Widgets**, not a browser, WebView, HTTP server, or launcher.
+Version 2 is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no browser, WebView, HTTP server, or launcher.
 
 ![Fotogramma Desktop](docs/assets/fotogramma-native-results.png)
 
@@ -17,8 +17,19 @@ It is built with **PySide6/Qt Widgets**, not a browser, WebView, HTTP server, or
 - **Find H.265 online** opens a cleaned-up search on 1337x.to in your default browser.
 - **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
 - Full-output validation before replacing an original file.
-- Original application icon, Cinema Pop theme, and bundled fonts.
+- Original application icon and Cinema Pop theme.
 - No videos are modified during inspection. No media or metadata is uploaded during scanning or conversion.
+
+## Size
+
+The portable archives are an order of magnitude smaller than the Qt/Python 1.x builds:
+
+| Component | 1.0.4 | 2.0.0 |
+| --- | --- | --- |
+| macOS application | 106 MB | 22.4 MB |
+| macOS ZIP | 44 MB | 10.0 MB |
+
+The bundle contains the Rust binary, the original icon, and a purpose-built FFmpeg with only the containers, codecs, and filters the app uses. CI fails the build if the application exceeds 35 MB or the ZIP exceeds 18 MB.
 
 ## Conversion presets
 
@@ -53,36 +64,39 @@ No content is downloaded, no torrent client is integrated, and no WebView is emb
 
 ## Run the portable app
 
-The portable build includes **Python, Qt, fonts, ffmpeg, and ffprobe**, so no installation is required on the destination computer.
+The portable build includes the Rust application and its own `ffmpeg`/`ffprobe`; no installation is required on the destination computer.
 
 For macOS Apple Silicon, download `Fotogramma-Darwin-arm64.zip` from the [latest release](https://github.com/JohnnyTaxs/fotogramma/releases/latest), then extract it with Finder (double-click). The bundle is ad-hoc signed but not notarized, so Gatekeeper asks for confirmation on first launch: use **System Settings → Privacy & Security → Open Anyway** (on older macOS versions, right-click `Fotogramma.app` → **Open**).
 
-Do not extract the ZIP with `unzip` or tools that turn symbolic links into copies: Qt and Python frameworks rely on those links, and the app bundle would no longer start. The `ditto`-based archive keeps them intact, and `deployment/build.py` verifies the extracted bundle signature before publishing.
+Use `ditto` when extracting from a terminal; generic ZIP tools can lose permissions and app-bundle metadata. The build script creates and verifies the archive with `ditto` and `codesign`.
 
-The portable build bundles `ffmpeg` and `ffprobe`, so no separate media tools are required.
-
-On Windows, run `Fotogramma.exe` inside the extracted folder. On Linux, run the `Fotogramma` binary. Each package must be built on its own operating system: PyInstaller is not a cross-compiler.
+On Windows, run `fotogramma.exe` inside the extracted folder. On Linux, run the `fotogramma` binary with `bin/` and `lib/` beside it. Each package is built on its own operating system: the release is never cross-compiled.
 
 ## Run from source
 
-Requirements: Python 3.10+, `ffmpeg` and `ffprobe` on `PATH` or in the project folder, and PySide6 Essentials.
-
-With `uv`, without creating an environment in the project:
+Requirements: a stable Rust toolchain plus `ffmpeg` and `ffprobe` on `PATH` (or set `FOTOGRAMMA_FFMPEG_DIR` to the folder that contains them).
 
 ```bash
-uv run --no-project --with pyside6-essentials python -m fotogramma
+cd rust
+cargo run --release -p fotogramma
 ```
 
 Optional arguments:
 
 ```bash
 # Pre-fill the library directory
-uv run --no-project --with pyside6-essentials python -m fotogramma --directory /path/to/videos
+cargo run --release -p fotogramma -- --directory /path/to/videos
 
 # Start scanning immediately
-uv run --no-project --with pyside6-essentials python -m fotogramma \
+cargo run --release -p fotogramma -- \
   --directory /path/to/videos --scan-on-start
+
+# Start, scan, and exit (automated verification)
+cargo run --release -p fotogramma -- \
+  --directory /path/to/videos --scan-on-start --smoke-test
 ```
+
+The application looks for the media tools in the executable folder, `bin/` beside it, the macOS `Resources/bin` folder, the working directory, and finally `PATH`.
 
 ## Usage
 
@@ -93,64 +107,70 @@ uv run --no-project --with pyside6-essentials python -m fotogramma \
 5. Click a column header to sort and double-click a video for details.
 6. Convert directly or export the list for another tool.
 
-The last directory and window geometry are remembered through `QSettings`; scan results are not persisted to disk.
+The last directory and window size are saved in `settings.toml` under the platform configuration folder. Scan results are never persisted.
 
 ## Tests
 
 ```bash
-QT_QPA_PLATFORM=offscreen \
-  uv run --no-project --with pyside6-essentials \
-  python -m unittest discover -s tests -v
+cd rust
+cargo test --workspace
 ```
 
-For worker and real conversion tests with demo fixtures:
+The suite covers discovery, probing, classification, presets, FFmpeg arguments, output allocation, duration/stream/full-decode validation, atomic replacement and backup restoration, settings, search URLs, the virtualized table, and four `egui_kittest` snapshots (main window and conversion dialog at 1280×820 and 1050×680).
+
+Two optional end-to-end tests convert a generated clip and verify atomic replacement with real FFmpeg binaries. They use the system tools by default, or the packaged minimal tools when `FOTOGRAMMA_FFMPEG_DIR` is set:
 
 ```bash
-FOTOGRAMMA_DEMO_DIR=/path/to/fixtures QT_QPA_PLATFORM=offscreen \
-  uv run --no-project --with pyside6-essentials \
-  python -m unittest discover -s tests -v
+FOTOGRAMMA_FFMPEG_DIR="$PWD/deployment/vendor/rust/Darwin-arm64/bin" \
+  cargo test -p fotogramma-core --test conversion_pipeline
 ```
-
-The suite currently contains **36 tests** covering the scanner, Qt models, main window, workers, presets, online search, real HEVC conversion, full validation, backup restoration, and release publishing.
 
 ## Build
 
+The minimal FFmpeg is built first, then the application is assembled and measured:
+
 ```bash
-uv run --no-project --with pyside6-essentials --with pyinstaller==6.22.3 \
-  python deployment/build.py
+deployment/ffmpeg/build_minimal.sh     # macOS and Linux
+python3 deployment/build_rust.py
 ```
 
-See [`deployment/README.md`](deployment/README.md) for platform-specific packaging instructions.
+See [`deployment/README.md`](deployment/README.md) for Windows, vendoring rules, and verification steps.
 
 ## CI/CD and releases
 
 ![Build & Release](https://github.com/JohnnyTaxs/fotogramma/actions/workflows/build-release.yml/badge.svg)
 
-The GitHub Actions workflow in `.github/workflows/build-release.yml` runs tests and builds on **Linux, Windows, and macOS ARM**. macOS Intel is intentionally excluded. On every `v*` tag it publishes or updates a GitHub release containing all portable ZIP files.
+The GitHub Actions workflow in `.github/workflows/build-release.yml` runs tests, builds the minimal FFmpeg, packages the app, and enforces the size budget on **Linux, Windows, and macOS ARM**. macOS Intel is intentionally excluded. On every `v*` tag it publishes or updates a GitHub release containing all portable ZIP files.
 
-Runner and token details are documented in [CI/CD with GitHub Actions](docs/CICD.md). Public repositories can use GitHub-hosted runners for free.
+Runner and token details are documented in [CI/CD with GitHub Actions](docs/CICD.md).
 
 ## Project structure
 
 ```text
-fotogramma/
-  app.py                 Entry point, icon, fonts, and CLI options
-  core/scanner.py        Discovery, ffprobe, classification, cancellation
-  core/media_tools.py    ffmpeg path in source and frozen builds
-  core/conversion.py     Presets, FFmpeg arguments, safe output allocation
-  core/verification.py   Full validation and atomic backup replacement
-  core/search.py         Title cleanup and external 1337x.to URLs
-  ui/main_window.py      Main window and selection actions
-  ui/conversion_dialog.py Presets and conversion progress
-  ui/models.py           QAbstractTableModel and QSortFilterProxyModel
-  ui/workers.py          ScanWorker and ConversionWorker
-  ui/theme.py            Cinema Pop QSS
-  ui/widgets.py          Native composition bar
-runtime.py               Resource paths in source and frozen builds
-static/                  Fonts, licenses, and original icon
-deployment/              PyInstaller and FFmpeg vendoring
-tests/                   unittest suite, including offscreen Qt
-docs/                    Architecture, CI/CD, and demo assets
+rust/
+  Cargo.toml               Workspace, release profile
+  crates/core/             UI-free engine
+    src/scanner.rs         Discovery, ffprobe, classification, cancellation
+    src/media_tools.rs     ffmpeg/ffprobe resolution and DYLD environment
+    src/conversion.rs      Presets, FFmpeg arguments, safe output allocation
+    src/verification.rs    Full validation and atomic backup replacement
+    src/search.rs          Title cleanup and external 1337x.to URLs
+    src/formatting.rs      Italian number and size formatting
+  crates/app/              egui/eframe application
+    src/app.rs             Window, layout, scan flow, snapshots
+    src/table.rs           Virtualized table, filters, sorting, selection
+    src/dialogs.rs         Conversion settings, progress, details, confirmations
+    src/worker.rs          Scan and conversion threads with channels
+    src/theme.rs           Cinema Pop colors, fonts, visuals
+    src/settings.rs        TOML settings (directory and window size only)
+    src/platform.rs        Open folder / open browser
+deployment/
+  ffmpeg/                  Minimal FFmpeg build and vendor collectors
+  build_rust.py            Packaging, ZIP, signature round-trip, size budget
+  create_release.py        GitHub release uploader
+  Fotogramma.icns/.ico/.png
+docs/                      Architecture, CI/CD, demo assets, release notes
+static/                    Fonts and licenses
 ```
 
 ## Documentation
@@ -165,6 +185,6 @@ docs/                    Architecture, CI/CD, and demo assets
 
 The app opens no server and sends no data online during scanning or conversion. Only the explicit 1337x.to search opens an external URL containing the video title.
 
-**Sora** and **IBM Plex Mono** are distributed with their respective SIL Open Font Licenses, included in `static/fonts/`. The original icon is included in `static/icons/`.
-
 Fotogramma itself is released under the **MIT License**. See [`LICENSE`](LICENSE) for the full text, including the warranty disclaimer.
+
+The bundled FFmpeg is built with `--enable-gpl --enable-libx265`, so the distributed media toolchain is covered by GPL v2 or later; the corresponding source is FFmpeg 9.0.2 plus x265, and the build flags are published in `deployment/ffmpeg/`. The application source remains MIT.

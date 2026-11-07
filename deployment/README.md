@@ -1,90 +1,107 @@
 # Native build and distribution
 
-The directory is named `deployment/` rather than `packaging/` to avoid a conflict with the Python `packaging` package required by PyInstaller.
+The directory is named `deployment/` rather than `packaging/` to avoid a conflict with the Python `packaging` package that the 1.x build still uses.
 
 ## Requirements
 
-For building:
-
-- Python 3.13 recommended;
-- `uv`;
-- PySide6 Essentials and PyInstaller downloaded in a temporary environment;
-- on macOS, `ffprobe` installed through Homebrew and Xcode tools for `otool`;
-- on Windows and Linux, network access to download static FFmpeg builds.
+- A stable Rust toolchain (`cargo`, `rustc`);
+- Python 3.10+ for the packaging and collector scripts;
+- on macOS: Xcode command line tools, `pkgconf`, and `x265` from Homebrew;
+- on Linux: `build-essential`, `pkg-config`, `nasm`, `patchelf`, `libx265-dev`, plus the X11/Wayland/OpenGL development packages listed in the CI workflow;
+- on Windows: MSYS2 MINGW64 with `mingw-w64-x86_64-toolchain`, `nasm`, `pkgconf`, and `x265`, and the MSVC Rust toolchain on the host.
 
 None of these are required on the destination computer.
 
-## Build
+## Minimal FFmpeg
 
-From the project root, on the target operating system:
+FFmpeg is no longer downloaded as a large community archive. It is built from the 9.0.2 source with only what the app uses:
 
 ```bash
-uv run --no-project --with pyside6-essentials --with pyinstaller==6.22.3 \
-  python deployment/build.py
+# macOS and Linux
+deployment/ffmpeg/build_minimal.sh
+
+# Windows, inside an MSYS2 MINGW64 shell
+deployment/ffmpeg/build_minimal_windows.sh
 ```
 
-The command prepares `ffprobe`, runs PyInstaller, and produces:
+Enabled components:
 
-- `Fotogramma.app` on macOS;
-- `dist/Fotogramma/` on Windows and Linux;
-- `dist/Fotogramma-<OS>-<arch>.zip` for transport.
+- demuxers `mov`, `matroska`, `rawvideo`;
+- muxers `mov`, `mp4`, `matroska`, `null`;
+- protocols `file` and `pipe`;
+- encoders `libx265`, `aac`, `mpeg4` (self-test only), `wrapped_avframe`, `pcm_s16le`;
+- decoders for the conversion inputs, copied audio and subtitle tracks, and HEVC output (H.264, VP8/VP9, AV1, MPEG-1/2/4, VC-1, ProRes, DNxHD, DV, MJPEG, Theora, H.263, FLV, FFV1, HuffYUV, AAC, AC-3/E-AC-3, DTS, TrueHD, Opus, Vorbis, FLAC, ALAC, MP2/MP3, PCM, SubRip, ASS/SSA, WebVTT, mov_text, PGS, DVD/DVB subtitles);
+- filters needed by the conversion graph and full-decode verification (`scale`, `format`, `aresample`, `aformat`, `null`, `anull`, and buffers).
 
-`build/`, `dist/`, and `deployment/vendor/` are ignored by Git.
+Network support, devices, x264, SVT-AV1, libvpx, OpenSSL, VMAF, mp3lame, and opus encoders are excluded. The resulting toolchain is about 17 MB instead of 38 MB on macOS.
 
-## Contents
+### Collected layout
 
-The **onedir** build includes Python, PySide6 Essentials, Qt plugins, fonts, licenses, `ffmpeg`, and `ffprobe`. It does not include a browser or Qt WebEngine.
+```
+deployment/vendor/rust/<System>-<arch>/
+  bin/ffmpeg
+  bin/ffprobe
+  lib/*.dylib | *.so.N | *.dll
+  manifest.json            # macOS and Linux
+```
 
-`runtime.py` uses `sys._MEIPASS` to locate assets in the relocated package. In frozen mode, `ffprobe` resolution always prefers the binary included in the bundle.
+`collect_macos.py` copies non-system dylibs, rewrites install names to `@loader_path`, ad-hoc signs every Mach-O file, and verifies that both binaries start.
 
-## ffmpeg and ffprobe by platform
+`collect_linux.py` copies the FFmpeg sonames and non-glibc dependencies, sets an `$ORIGIN/../lib` runpath with `patchelf`, and verifies both binaries start.
 
-### macOS
+`build_minimal_windows.sh` copies every non-system DLL next to the executables because Windows resolves them from the executable folder.
 
-`deployment/prepare_ffprobe.py`:
+`deployment/vendor/` is ignored by Git. Rebuild it on each platform; do not commit binaries.
 
-1. copies `ffmpeg` and `ffprobe` from the Homebrew installation used for the build;
-2. reads dependencies with `otool -L`;
-3. recursively copies non-system dylibs into `lib/`;
-4. runs both binaries with a local `DYLD_LIBRARY_PATH`;
-5. verifies with `DYLD_PRINT_LIBRARIES` that no library is loaded from Homebrew.
+## Build the application
 
-`deployment/vendor/<OS>-<arch>/manifest.json` records the SHA-256 and size of every collected file.
+```bash
+python3 deployment/build_rust.py
+```
 
-### Windows and Linux
+The script:
 
-The downloader extracts `ffmpeg` and `ffprobe` (or the corresponding `.exe` files) from the static gyan.dev and johnvansickle.com archives. It does not extract complete directories and never uses an archive path to write outside the vendor folder.
+1. reads the version from `rust/Cargo.toml` (or `FOTOGRAMMA_VERSION`);
+2. runs `cargo build --release --locked -p fotogramma`;
+3. assembles the platform bundle;
+4. creates `dist/Fotogramma-<System>-<arch>.zip`;
+5. on macOS, extracts the ZIP again and runs `codesign --verify --deep --strict` on both copies;
+6. fails if the app exceeds 35 MB or the ZIP exceeds 18 MB.
+
+Set `FOTOGRAMMA_RUST_SKIP_BUILD=1` to reuse an existing release binary.
+
+### Layouts
+
+- **macOS:** `Fotogramma.app/Contents/MacOS/fotogramma`, `Contents/Resources/bin/{ffmpeg,ffprobe}`, `Contents/Resources/lib/*.dylib`, `Contents/Info.plist`, `Contents/Resources/Fotogramma.icns`.
+- **Linux:** `Fotogramma/fotogramma`, `Fotogramma/bin/{ffmpeg,ffprobe}`, `Fotogramma/lib/*.so.N`.
+- **Windows:** `Fotogramma/fotogramma.exe`, `Fotogramma/bin/{ffmpeg.exe,ffprobe.exe}`, `Fotogramma/bin/*.dll`.
+
+The application searches the executable folder, `bin/` beside it, and the macOS `Resources/bin` folder before falling back to `PATH`.
 
 ## Verification
 
 ```bash
 # Start the GUI
-Fotogramma --directory /path/to/fixtures --scan-on-start --smoke-test
-
-# Explicit macOS path
-Fotogramma.app/Contents/MacOS/Fotogramma \
+Fotogramma.app/Contents/MacOS/fotogramma \
   --directory /path/to/fixtures --scan-on-start --smoke-test
 ```
-
-Smoke-test mode closes automatically after startup or after the scan completes.
 
 Before release:
 
 1. Extract the ZIP in a new directory.
 2. Start with `PATH=/usr/bin:/bin`.
-3. Verify startup, fonts, and a complete scan.
-4. Extract the ZIP again elsewhere and repeat.
-5. Verify that no external native libraries are loaded.
-6. Convert a short H.264 with the bundled `ffmpeg` and confirm `hevc` with the bundled `ffprobe`.
+3. Verify startup and a complete scan.
+4. Confirm that the scan uses the bundled tools (`FOTOGRAMMA_FFMPEG_DIR` is not required in the bundle).
+5. Convert a short H.264 clip with the bundled `ffmpeg` and confirm `hevc` with the bundled `ffprobe`.
+6. Run the pipeline test with `FOTOGRAMMA_FFMPEG_DIR` pointing at the packaged `bin/`; it verifies copy mode and atomic replacement.
+7. Simulate a failed final check to confirm the original is preserved.
 
-For verified replacement, use only temporary copies of fixtures. Confirm that codec, duration, streams, and full decode are validated before renaming, and that the `.fotogramma-backup` is deleted only after success. Simulate a failed test to confirm that the original is preserved.
-
-The `Fotogramma-Darwin-arm64.zip` build has been verified with this workflow. Windows and Linux require the same verification on their own systems.
-
-## macOS archive
-
-Create the macOS ZIP with `ditto -c -k --sequesterRsrc --keepParent` so framework symbolic links survive; a generic ZIP writer stores them as full copies and breaks the ad-hoc signature, after which macOS kills the app at launch. `deployment/build.py` does this automatically and then extracts the archive again into a temporary directory, running `codesign --verify --deep --strict` on both the original and the extracted bundle.
+The macOS ZIP must be created with `ditto -c -k --sequesterRsrc --keepParent`. A generic ZIP writer can turn framework symbolic links into copies and invalidate the ad-hoc signature, after which macOS kills the app at launch. `build_rust.py` does this and verifies the extracted bundle before publishing.
 
 ## Signing
 
 The macOS build is ad-hoc signed but not notarized. On macOS 15 and later, allow the first launch in **System Settings → Privacy & Security → Open Anyway**; on older versions, use right-click → Open. Public distribution without warnings requires a Developer ID certificate and Apple notarization. Windows SmartScreen may also require a code-signing strategy.
+
+## Licensing
+
+The bundled FFmpeg is configured with `--enable-gpl --enable-libx265`. The FFmpeg source, build flags, and x265 dependency are published here; the application source remains MIT.

@@ -1,151 +1,131 @@
 # Native architecture
 
-Fotogramma Desktop has no HTTP component. The executable starts `QApplication` and a native `MainWindow` directly.
+Fotogramma Desktop has no HTTP component. The executable starts an `egui`/`eframe` window backed by OpenGL and talks to FFmpeg only through child processes.
 
 ```text
-fotogramma.__main__
+fotogramma (Rust binary)
         |
         v
-QApplication + MainWindow
+eframe + egui (glow / OpenGL)
         |
-        +--> QFileDialog / QSettings
+        +--> rfd file dialogs
+        +--> TOML settings (directory and window size)
         |
-        +--> ScanWorker (QThread)
-                |
-                +--> discover_videos
-                +--> probe_videos (up to 4 ffprobe processes)
-                |
-                v
-        Qt signals in the GUI thread
-                |
-                v
-VideoTableModel --> VideoFilterProxy --> QTableView
-        |
-        +--> selected videos --> external search or ConversionWorker
-                                      |
-                                      +--> ffmpeg (new .h265 files)
+        +--> scan thread --------------------------------+
+        |       discover_videos                          |
+        |       probe_videos (up to 4 ffprobe processes) |
+        |       mpsc channel --> GUI thread              |
+        |                                                |
+        +--> conversion thread (sequential queue)        |
+                build_ffmpeg_args                        |
+                ffmpeg -progress pipe:1                  |
+                validate_conversion_output               |
+                replace_verified_output                  |
+                mpsc channel --> GUI thread              |
 ```
+
+## Workspace
+
+`rust/Cargo.toml` defines a two-crate workspace, version `2.0.0`:
+
+| Crate | Responsibility |
+| --- | --- |
+| `fotogramma-core` | Discovery, probing, classification, conversion profiles, FFmpeg arguments, verification, search URLs, formatting. No UI dependency. |
+| `fotogramma` | `eframe` window, table, dialogs, theme, settings, worker threads, platform helpers. |
+
+Release profile: `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true`, `opt-level = "z"`. The executable is about 3.3 MB.
 
 ## Modules
 
-### `fotogramma/app.py`
+### `crates/core/src/scanner.rs`
 
-- Creates `QApplication` and loads fonts through `resource_path`.
-- Applies the Cinema Pop QSS theme and original application icon.
-- Exposes `--directory`, `--scan-on-start`, and `--smoke-test` for automated verification.
-- Closes smoke-test runs only after the worker has finished.
+- `discover_videos`: deterministic recursive traversal of `.mp4`, `.mkv`, and `.webm`; collects warnings instead of aborting on unreadable directories.
+- `probe_video`: runs `ffprobe` with a 45-second timeout on the first video stream (`v:0`), then reads duration, size, resolution, and stream categories.
+- `probe_videos`: up to four concurrent `ffprobe` processes, cancellable through an `AtomicBool`; a cancelled probe kills the child with `Popen`-equivalent semantics.
+- Classification: `hevc` and `av1` are compatible; any other readable codec is `convert`; probe failures are `error`.
 
-### `core/scanner.py`
+### `crates/core/src/media_tools.rs`
 
-Contains the video engine, independent of Qt.
+`find_tool()` searches, in order: `FOTOGRAMMA_FFMPEG_DIR`, the executable folder, `bin/` beside it, the macOS `Resources/bin` folder, the working directory, then `PATH`.
 
-- `discover_videos`: deterministic traversal and `os.walk` warnings.
-- `probe_video`: `Popen` with a 45-second timeout, JSON metadata, and cancellation.
-- `probe_videos`: up to four processes per batch, with no second queued wave.
-- `get_ffprobe_path`: prefers the bundled binary in frozen applications.
-- `ffprobe_environment`: adds `lib` to `DYLD_LIBRARY_PATH` in frozen macOS builds.
+On macOS, `tool_environment()` points `DYLD_LIBRARY_PATH` at the tool folder when shared libraries sit next to the binary. Packaged builds use `@loader_path` install names instead, so no environment variable is required. `prepare_command()` applies the same environment to every child process.
 
-### `core/media_tools.py`
+### `crates/core/src/conversion.rs`
 
-`get_ffmpeg_path()` resolves `ffmpeg` in source and frozen builds, preferring the bundled binary. `ffprobe_environment()` is shared with conversion processes so they use the included native libraries.
-
-### `core/conversion.py`
-
-`ConversionProfile` defines CRF, preset, pixel format, tune, AQ mode, and audio behavior. Available profiles are `max_quality`, `balanced`, and `fast`, plus `custom_profile` for manual configuration.
+`ConversionProfile` defines CRF, preset, pixel format, tune, AQ mode, and audio behavior. The built-in profiles are `max_quality`, `balanced`, and `fast`, plus `custom_profile`.
 
 `build_ffmpeg_args()` generates:
 
 - `-n` to prevent overwriting;
 - `-map 0` for all streams;
 - `libx265` with the selected CRF, preset, and pixel format;
-- audio `copy` or AAC with a selected bitrate;
+- audio `copy` or AAC at the selected bitrate;
 - subtitles and data `copy`;
 - original metadata and chapters;
 - `+faststart` only for MP4;
 - `-progress pipe:1` for native progress reporting.
 
-`allocate_output_path()` adds `.h265` and a numeric suffix when the destination exists. `allocate_partial_path()` creates a same-filesystem temporary file used only after full validation and preserves the original MKV/MP4 extension.
+`allocate_output_path()` adds `.h265` and a numeric suffix when the destination exists. `allocate_partial_path()` creates a same-filesystem temporary file used only after full validation and preserves the original MKV/MP4 extension; WebM replacement is rejected.
 
-### `core/verification.py`
+### `crates/core/src/verification.rs`
 
 Verified replacement has two separate phases:
 
 1. `validate_conversion_output()` checks HEVC, duration within max(1 second, 1%), matching stream counts, and a full decode using `ffmpeg -v error -i output -f null -`.
 2. `replace_verified_output()` renames the original to `.fotogramma-backup`, moves the `.partial` over the original path, checks the codec again, and only then deletes the backup.
 
-If any test fails, no replacement occurs. If the final check fails after renaming, the backup restores the original. WebM replacement is unsupported.
+If any test fails, no replacement occurs. If the final check fails after renaming, the backup restores the original. On Windows, the failed output is removed before restoring because `rename` cannot replace an existing file.
 
-### `core/search.py`
+### `crates/core/src/search.rs`
 
-Cleans release tags from the title and builds `https://1337x.to/search/<title+H.265>/1/`, including the required first-page suffix. `QDesktopServices.openUrl()` opens the external browser only after an explicit user action; no network request is made by the app itself.
+Cleans release tags from the title and builds `https://1337x.to/search/<title+H.265>/1/`, including the required first-page suffix. The browser opens only after an explicit user action; the app makes no network request itself.
 
-### `ui/workers.py`
+### `crates/app/src/app.rs`
 
-`ScanWorker` runs outside the GUI thread and emits:
+Owns the window state: directory, scan lifecycle, filters, selection, sorting, warnings, conversion dialog, and progress session. All widget interaction happens in the GUI thread. Smoke-test mode closes the window after startup or after the scan completes.
 
-- `progress(processed, total, current_file)` with `total = -1` during discovery;
-- `scanCompleted(videos, warnings, cancelled)`;
-- `failed(message)` for unrecoverable errors.
+Four `egui_kittest` snapshot tests render the main window and conversion dialog at 1280×820 and 1050×680.
 
-`ConversionWorker` processes a sequential queue to avoid CPU and disk saturation. It merges `stderr=STDOUT`, reads `out_time_ms` to compute progress relative to video duration, and always closes the output stream after `wait()`.
+### `crates/app/src/table.rs`
 
-### `ui/models.py`
+A virtualized `egui_extras::TableBuilder` with six columns: Video, Codec, Duration, Resolution, Size, and Action. Sorting uses typed values, so size and duration never sort as strings. Selection supports click, Ctrl/Cmd toggle, and Shift ranges; category filters and case-insensitive search match name, path, and codec.
 
-`VideoTableModel` exposes six native columns: Video, Codec, Duration, Resolution, Size, and Action.
+### `crates/app/src/worker.rs`
 
-Custom roles:
+`spawn_scan()` and `spawn_conversion()` return `mpsc::Receiver`s and request a repaint after every message. The scan worker sends `Progress`, `Completed`, and `Failed`. The conversion worker sends `FileStarted`, `Progress`, `VerificationStarted`, `FileCompleted`, and `ConversionCompleted`.
 
-- `INFO_ROLE`: full `VideoInfo` object;
-- `SORT_ROLE`: typed value used for sorting;
-- `CATEGORY_ROLE`: category used by the proxy.
+Conversions run sequentially to avoid saturating CPU and disk. `stderr` is merged into `stdout`, `out_time_ms` is parsed for progress, and the pipe is closed after `wait()`.
 
-`VideoFilterProxy` applies category filtering and case-insensitive search across name, path, and codec. Numeric sorting uses the custom role, so size and duration are not sorted as strings.
+### `crates/app/src/dialogs.rs`
 
-### `ui/main_window.py`
+Profile selection, custom CRF/preset/pixel format/tune/AQ controls, audio mode, container, destination, three-row FFmpeg command preview, progress, log, per-file results, and the close confirmation. The modal is capped in width and height and scrolls its body while pinning the action buttons.
 
-Handles:
+### `crates/app/src/theme.rs`
 
-- directory selection and validation;
-- clickable statistics and filters;
-- progress and cancellation;
-- partial-result warnings;
-- double-click details;
-- export through `QFileDialog`;
-- selection-based online search and conversion;
-- close confirmation when a job is active.
+Cinema Pop colors and embedded **Sora** / **IBM Plex Mono** fonts (SIL Open Font License, licenses in `static/fonts/`). `Visuals::strong_text_color()` derives from `widgets.active.fg_stroke`; it must stay light or `.strong()` labels become nearly invisible.
 
-`QSettings` stores only the directory and geometry. Videos remain in memory while the app is open.
+### `crates/app/src/settings.rs`
+
+Reads and writes `settings.toml` in `~/Library/Application Support/Fotogramma`, `%APPDATA%\Fotogramma`, or `$XDG_CONFIG_HOME/fotogramma`. Only the directory and window size are stored; scan results are never persisted. The config directory is disabled under `cfg!(test)` so snapshots never touch user files.
 
 ## UI states
 
-The `QStackedWidget` contains:
+The window shows the initial composition summary, the results table after a scan, and inline progress while scanning. The conversion dialog is a modal with a fixed action row. Controls are disabled when no video is selected or while a job is active.
 
-1. the initial page with a codec matrix;
-2. the results page;
-3. the error page with Retry.
+## Packaging
 
-Controls are disabled during scanning and progress is shown in the command bar. Interrupted files are not classified as errors.
+`deployment/build_rust.py` runs on the target operating system:
 
-## Frozen builds
+- macOS: `Fotogramma.app` with `Contents/MacOS/fotogramma`, `Contents/Resources/bin`, `Contents/Resources/lib`, `Info.plist`, and icon; ad-hoc signed; ZIP created with `ditto` and the extracted bundle verified with `codesign`.
+- Linux: `Fotogramma/` with the binary, `bin/ffmpeg`, `bin/ffprobe`, and `lib/` shared objects; the tools carry an `$ORIGIN/../lib` runpath.
+- Windows: `Fotogramma/` with `fotogramma.exe`, `bin/ffmpeg.exe`, `bin/ffprobe.exe`, and the required DLLs.
 
-`runtime.py` uses `sys._MEIPASS` to locate assets and binaries. The onedir bundle contains:
-
-- the Python interpreter;
-- PySide6 Essentials and required Qt plugins;
-- `static/` with fonts and licenses;
-- `ffmpeg`, `ffprobe`, and native dependencies;
-- the `fotogramma` package and `runtime.py`.
-
-The bundle can be moved. Verification extracts it in another directory and starts it with `PATH=/usr/bin:/bin`, avoiding system Python and Homebrew.
+The build fails when the application exceeds 35 MB or the ZIP exceeds 18 MB.
 
 ## Testing
 
-- Engine tests with mocks for `Popen`, `os.walk`, and concurrency.
-- Model/proxy tests with offscreen `QApplication`.
-- `MainWindow` tests for statistics, filters, selection, warnings, and the conversion dialog.
-- Worker tests on five real fixtures via `FOTOGRAMMA_DEMO_DIR`.
-- Real short H.264 conversion verified as `hevc`, with the original unchanged.
-- Preset, AAC/faststart argument, selection-action, command-preview, and online URL tests.
-- Full validation, successful replacement, failed-validation preservation, and backup restoration tests.
-- GitHub release client tests with a local HTTP server for create, retrieve, and asset replacement, with no token in logs.
-- Native screenshots captured with `QWidget.grab()`, not browser or HTML screenshots.
+- Core unit tests for discovery, probing, classification, presets, arguments, allocation, verification tolerance, search, and formatting.
+- App unit tests for settings, selection, filters, and dialog outcomes.
+- Four `egui_kittest` snapshots, accepted with `UPDATE_SNAPSHOTS=1 cargo test`.
+- Two real FFmpeg pipeline tests for copy mode and atomic replacement; they skip when no tools are installed.
+- Packaging round-trip: moved bundle, clean `PATH`, bundled tools, `codesign --verify --deep --strict`.

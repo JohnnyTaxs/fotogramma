@@ -1,101 +1,115 @@
 # AGENTS.md
 
-Operational guide for agents modifying **Fotogramma Desktop**, the native project. The webapp in `h265-check` is a separate project: do not turn this application into a launcher or WebView.
+Operational guide for agents modifying **Fotogramma Desktop** (v2, Rust). The webapp in `h265-check` is a separate project: do not turn this application into a launcher or WebView.
 
 ## Invariants
 
-- **Native Qt widgets only** through PySide6 Essentials. No HTTP server, Electron, Tauri, or Qt WebEngine. An external browser is allowed only for the user-requested 1337x.to search.
+- **Native desktop only** through `egui`/`eframe` with the `glow` (OpenGL) renderer. No HTTP server, Electron, Tauri, Qt, or WebView. An external browser is allowed only for the user-requested 1337x.to search.
 - **Default mode never overwrites originals.** Replacement is allowed only after HEVC, duration, stream, full-decode, and final-codec validation, with an atomic backup restored on failure.
 - `hevc` and `av1` are `compatible`; every other valid codec is `convert`; read failures are `error`.
 - Only the first video stream (`v:0`) of `.mp4`, `.mkv`, and `.webm` is analyzed.
 - No CDN or online service is required at runtime.
-- `QSettings` stores only directory and geometry, not scan results.
+- `settings.toml` stores only the directory and window size, not scan results.
 - Build **onedir** for each OS/architecture, never onefile and never cross-compiled.
+- The packaged app must stay within **35 MB** with a ZIP within **18 MB**.
 
 ## Commands
 
 ```bash
-# Run from source
-uv run --no-project --with pyside6-essentials python -m fotogramma
+# Run from source (requires ffmpeg/ffprobe on PATH or FOTOGRAMMA_FFMPEG_DIR)
+cd rust
+cargo run --release -p fotogramma
 
 # Full test suite
-QT_QPA_PLATFORM=offscreen \
-  uv run --no-project --with pyside6-essentials \
-  python -m unittest discover -s tests -v
+cd rust
+cargo test --workspace
 
-# Build
-uv run --no-project --with pyside6-essentials --with pyinstaller==6.22.3 \
-  python deployment/build.py
+# Update the four egui_kittest snapshots after an intentional layout change
+cd rust
+UPDATE_SNAPSHOTS=1 cargo test -p fotogramma snapshot
+
+# Minimal FFmpeg (macOS/Linux), then package and enforce the size budget
+deployment/ffmpeg/build_minimal.sh
+python3 deployment/build_rust.py
 
 # Static checks
-python3 -m compileall -q fotogramma runtime.py deployment
+cd rust && cargo check --workspace && cargo fmt --check
 git diff --check
 ```
 
-Do not install the full `PySide6` package: it includes WebEngine and unnecessary dependencies. Always use **PySide6-Essentials**.
+Windows builds use `deployment/ffmpeg/build_minimal_windows.sh` inside MSYS2 MINGW64. Never substitute the full Homebrew/community FFmpeg archive: it breaks the size budget.
 
 ## Architecture
 
 | File | Rules |
 | --- | --- |
-| `fotogramma/app.py` | Entry point, fonts, icon, and smoke-test timers. Never add a server. |
-| `fotogramma/core/scanner.py` | Discovery, Popen, classification, and cancellation. Must remain Qt-independent. |
-| `fotogramma/ui/workers.py` | `ScanWorker` and `ConversionWorker`. No UI operations in worker threads. |
-| `fotogramma/ui/main_window.py` | All interactions happen in the GUI thread, including multi-selection. |
-| `fotogramma/core/conversion.py` | Profiles and FFmpeg arguments. Use `-n`, `-map 0`, and non-overwriting output. |
-| `fotogramma/core/media_tools.py` | ffmpeg resolution in source and frozen builds. |
-| `fotogramma/core/search.py` | External 1337x.to URLs only; no integrated network requests. |
-| `fotogramma/core/verification.py` | Codec/duration/stream validation, full decode, and atomic backup replacement. |
-| `fotogramma/ui/conversion_dialog.py` | Profiles, command preview, and progress. Keep controls in the GUI thread. |
-| `fotogramma/ui/models.py` | Model/proxy for large libraries, custom roles, and badges. |
-| `fotogramma/ui/theme.py` | Cinema Pop QSS; do not introduce HTML/CSS or a second theme. |
-| `runtime.py` | `resource_path` for assets in source and frozen builds. |
-| `deployment/` | Build, download, and vendoring. Do not rename it `packaging`, which would conflict with the Python package. |
+| `rust/crates/core/src/scanner.rs` | Discovery, `Popen`-equivalent probing, classification, cancellation. Must remain UI-independent. |
+| `rust/crates/core/src/media_tools.rs` | ffmpeg/ffprobe resolution in source and packaged builds; `DYLD_LIBRARY_PATH` only on macOS. |
+| `rust/crates/core/src/conversion.rs` | Profiles and FFmpeg arguments. Use `-n`, `-map 0`, and non-overwriting output. |
+| `rust/crates/core/src/verification.rs` | Codec/duration/stream validation, full decode, and atomic backup replacement. |
+| `rust/crates/core/src/search.rs` | External 1337x.to URLs only; no integrated network requests. |
+| `rust/crates/app/src/app.rs` | Entry state, layout, selection, scan flow, smoke test, four snapshots. |
+| `rust/crates/app/src/table.rs` | Virtualized table, filters, sorting, selection, exact column widths. |
+| `rust/crates/app/src/dialogs.rs` | Conversion settings, command preview, progress, results, close confirmation. |
+| `rust/crates/app/src/worker.rs` | Scan and conversion threads; communicate only through channels. |
+| `rust/crates/app/src/theme.rs` | Cinema Pop colors and embedded Sora/IBM Plex Mono. Do not introduce HTML/CSS or a second theme. |
+| `rust/crates/app/src/settings.rs` | TOML preferences; config directory disabled under `cfg!(test)`. |
+| `rust/crates/app/src/platform.rs` | Open a folder or the external browser. |
 
-Data flow: directory → `discover_videos` → `probe_videos` → Qt signals → model → proxy → `QTableView`.
+Data flow: directory → `discover_videos` → `probe_videos` → `mpsc` → app state → `TableBuilder`.
 
 ## Threads and shutdown
 
-- Never update widgets from `ScanWorker.run()`: use `progress`, `scanCompleted`, and `failed`.
-- Keep a reference to each worker to prevent destruction while running.
-- Cancellation uses `threading.Event`; `probe_video` terminates the process with `Popen.kill()`.
-- In `closeEvent`, ask for confirmation if a job is active and wait for the worker before accepting shutdown.
-- `ConversionWorker` uses `-progress pipe:1` and `stderr=STDOUT` to avoid deadlocks; always close `process.stdout` after `wait()`.
-- Do not run parallel conversions: the sequential queue reduces CPU and disk saturation. `fileStarted`, `progress`, `fileCompleted`, and `conversionCompleted` update the UI only through signals.
+- Never update widgets from a worker thread: send a message and call `ctx.request_repaint()`.
+- Keep the `Receiver` and cancellation `Arc<AtomicBool>` alive for the job's duration.
+- Cancellation kills the `ffprobe` child; conversion kills the `ffmpeg` child and reports `cancelled`.
+- In the close path, ask for confirmation if a job is active and wait for it before exiting.
+- Conversion merges `stderr` into `stdout`, reads `-progress pipe:1`, and closes the pipe after `wait()`.
+- Do not run parallel conversions: the sequential queue avoids CPU and disk saturation.
 - Replacement must always use `allocate_partial_path`, `validate_conversion_output`, and `replace_verified_output`. Never rename the original before these steps and never delete the backup before the final check. WebM replacement is unsupported.
-- Do not call Qt GUI methods from worker tests without `QApplication` when using widgets or `QPixmap`; GUI tests use `QT_QPA_PLATFORM=offscreen`.
 
-## Model contract
+## Table contract
 
-`INFO_ROLE`, `SORT_ROLE`, and `CATEGORY_ROLE` are internal model dependencies. Update the proxy and tests when changing them. `QSortFilterProxyModel.set_category` and `set_query` must call `invalidate()`; do not use the deprecated `invalidateFilter()`.
+The table uses `egui_extras::TableBuilder` with virtualized rows, native sorting, and exact column widths. Adding a column means updating the header list, cell rendering, sort values, tests, and layout math. Category filters and search must remain case-insensitive across name, path, and codec.
 
-The table uses native header sorting, not HTML pagination. For new columns update `HEADERS`, `data`, `_sort_value`, tests, and layout.
+## Snapshots and accessibility
+
+- Four accepted PNGs live in `rust/crates/app/tests/snapshots/`: main window and conversion dialog at 1280×820 and 1050×680.
+- `egui_kittest` writes `*.new.png` on mismatch and keeps the previous `*.old.png`; accept deliberately with `UPDATE_SNAPSHOTS=1` and delete the backups.
+- Every interactive control needs an accessible label (`labelled_by`); the accessibility check must pass.
+- `Visuals::strong_text_color()` reuses `widgets.active.fg_stroke`; keep it light or `.strong()` text becomes invisible.
+- The conversion modal must fit 1050×680: capped width, scrollable body, pinned action row.
 
 ## Build and assets
 
-- PyInstaller includes `static/`, `ffmpeg`, and `ffprobe` through `deployment/Fotogramma.spec`.
-- On macOS the portable ZIP is created with `ditto -c -k --sequesterRsrc --keepParent`, never with `shutil.make_archive`: a generic ZIP writer stores framework symbolic links as file copies, breaks the ad-hoc signature, and macOS kills the app at launch. `deployment/build.py` re-extracts the archive and runs `codesign --verify --deep --strict` before publishing.
-- `deployment/Fotogramma.spec` keeps only the Qt plugins the app uses on macOS (`platforms`, `styles`), excludes unused PySide6 modules, and lists vendored FFmpeg dylibs with destination `.` so each one is packaged once. Changing these lists requires rebuilding and re-checking both launches and `codesign`. Do not remove framework binaries from the TOC on their own: PyInstaller leaves dangling framework links and the bundle signature becomes invalid.
-- On macOS, `ffprobe_environment()` uses `lib` through `DYLD_LIBRARY_PATH`.
-- `deployment/prepare_ffprobe.py` verifies with `DYLD_PRINT_LIBRARIES` that no Homebrew library is loaded by `ffmpeg` or `ffprobe`.
-- Windows and Linux download both binaries from static archives without extracting arbitrary paths.
-- Do not commit `build/`, `dist/`, `deployment/vendor/`, `.venv/`, or screenshots containing real user data.
+- `deployment/ffmpeg/build_minimal.sh` and `build_minimal_windows.sh` define the only supported FFmpeg component list. Adding a codec or filter must be justified by a real app path and re-measured against the budget.
+- `deployment/ffmpeg/collect_macos.py` rewrites install names to `@loader_path`, re-signs every Mach-O file, and verifies relocation.
+- `deployment/ffmpeg/collect_linux.py` sets an `$ORIGIN/../lib` runpath with `patchelf`.
+- macOS archives use `ditto -c -k --sequesterRsrc --keepParent`; `deployment/build_rust.py` extracts the ZIP again and runs `codesign --verify --deep --strict` before publishing.
+- The macOS `Info.plist` embeds the version from `rust/Cargo.toml`.
+- Windows embeds the icon and version through `rust/crates/app/build.rs` (`winresource`).
+- Do not commit `rust/target/`, `build/`, `dist/`, `deployment/vendor/`, or screenshots containing real user data.
 
 ## CI/CD and releases
 
-The workflow lives at `.github/workflows/build-release.yml` and runs tests and builds on Linux (`ubuntu-latest` with `node:22-bookworm`), Windows (`windows-latest`), and macOS ARM (`macos-15`). Do not add macOS Intel or Forgejo-specific runner configuration. On Linux, install PySide6 Essentials with pip, not the unavailable `python3-pyside6` apt package; also install the OpenGL, D-Bus, font, GLib, X11/XCB, and xkbcommon runtime packages listed in the workflow for offscreen and XCB Qt.
+`.github/workflows/build-release.yml` runs on Linux, Windows, and macOS ARM:
 
-`deployment/create_release.py` publishes or updates a GitHub release through `GITHUB_API_URL` and `GITHUB_REPOSITORY`, replacing same-name assets instead of duplicating them. Never print `GITHUB_TOKEN` or `FORGEJO_TOKEN`.
+- builds the minimal FFmpeg on each platform;
+- runs `cargo test --workspace --locked`;
+- reruns the real pipeline tests against the freshly built tools;
+- packages with `deployment/build_rust.py` and enforces the size budget;
+- on a `v*` tag, publishes through `deployment/create_release.py`.
 
-After changing the workflow or release client, run `tests.test_create_release`. Release tags follow SemVer (`v1.0.0`).
+Do not add macOS Intel or Forgejo-specific runner configuration. Never print `GITHUB_TOKEN` or `FORGEJO_TOKEN`. Release tags follow SemVer (`v2.0.0`).
 
 ## Checklist
 
-1. No browser/WebView dependency was introduced.
-2. Unit tests are updated and green.
-3. GUI behavior is verified with offscreen Qt screenshots, not just logic tests.
-4. At least five fixtures are scanned: two convert, two compatible, one error; a short H.264 is converted and verified as `hevc` without modifying the original.
-5. The moved build starts with `PATH=/usr/bin:/bin`; scanning and conversion use the bundled `ffmpeg`.
-6. `git diff --check` and `compileall` pass.
-7. README, `docs/`, and this guide are updated if architecture or commands change.
-8. Packaging changes are tested by moving the build to another directory, starting it with a clean `PATH`, scanning, converting, and shutting down.
+1. No browser/WebView/server dependency was introduced.
+2. `cargo test --workspace` is green and snapshots are intentional.
+3. GUI behavior is verified with offscreen `egui_kittest` snapshots, not just logic tests.
+4. Five fixtures are scanned: two convert, two compatible, one error.
+5. A short H.264 is converted and verified as `hevc` without modifying the original; replacement is tested with a temporary copy.
+6. The moved macOS bundle starts with `PATH=/usr/bin:/bin`, scans, converts, and shuts down.
+7. `cargo fmt --check`, `cargo check --workspace`, and `git diff --check` pass.
+8. README, `docs/`, and this guide are updated if architecture or commands change.
+9. The size budget passes; report the measured app and ZIP sizes.
