@@ -81,6 +81,10 @@ For verified replacement, use only temporary copies of fixtures. Confirm that co
 
 The `Fotogramma-Darwin-arm64.zip` build has been verified with this workflow. Windows and Linux require the same verification on their own systems.
 
+## macOS archive
+
+Create the macOS ZIP with `ditto -c -k --sequesterRsrc --keepParent` so framework symbolic links survive; a generic ZIP writer stores them as full copies and breaks the ad-hoc signature, after which macOS kills the app at launch. `deployment/build.py` does this automatically and then extracts the archive again into a temporary directory, running `codesign --verify --deep --strict` on both the original and the extracted bundle.
+
 ## Signing
 
-The macOS build is ad-hoc signed but not notarized. Use right-click → Open on first launch. Public distribution without warnings requires a Developer ID certificate and Apple notarization. Windows SmartScreen may also require a code-signing strategy.
+The macOS build is ad-hoc signed but not notarized. On macOS 15 and later, allow the first launch in **System Settings → Privacy & Security → Open Anyway**; on older versions, use right-click → Open. Public distribution without warnings requires a Developer ID certificate and Apple notarization. Windows SmartScreen may also require a code-signing strategy.

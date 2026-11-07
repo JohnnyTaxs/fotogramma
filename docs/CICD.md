@@ -49,8 +49,13 @@ The script uses the GitHub API directly:
 
 - `POST /repos/{owner}/{repo}/releases` to create a release;
 - `GET /repos/{owner}/{repo}/releases/tags/{tag}` when it already exists;
+- `PATCH /repos/{owner}/{repo}/releases/{id}` to refresh the release body;
 - deletion of an existing asset with the same name before re-uploading, making reruns idempotent;
 - upload of every ZIP with `Content-Type: application/zip` through the release's dedicated `upload_url` endpoint.
+
+Release notes come from `docs/releases/<tag>.md`, for example `docs/releases/v1.0.3.md`. When no file exists for the tag, GitHub generates notes from the commit history (`generate_release_notes`). Adding or editing the file and rerunning the release job updates the published body without touching the assets.
+
+The build jobs also receive `FOTOGRAMMA_VERSION` from the tag, so `Info.plist` carries the released version. The macOS ZIP is created with `ditto` and `build.py` re-extracts it to verify `codesign --verify --deep --strict` before the artifact is uploaded.
 
 There are no release actions tied to another hosting provider: `GITHUB_API_URL` comes from the GitHub Actions context (`github.api_url`).
 
@@ -86,6 +91,7 @@ The tag starts all builds and then the release job. To rerun without creating a 
 
 - release creation;
 - retrieval of an existing release;
+- release notes creation and update;
 - asset replacement on a second upload;
 - no token in the logs.
 

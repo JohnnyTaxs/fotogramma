@@ -1,10 +1,12 @@
 # Native Qt onedir build for Fotogramma Desktop.
+import os
 from pathlib import Path
 import platform
 
 ROOT = Path.cwd()
 SYSTEM = platform.system()
 MACHINE = platform.machine().lower()
+APP_VERSION = os.environ.get("FOTOGRAMMA_APP_VERSION") or "0.0.0"
 VENDOR = ROOT / "deployment" / "vendor" / f"{SYSTEM}-{MACHINE}"
 BINARY_NAME = "ffprobe.exe" if SYSTEM == "Windows" else "ffprobe"
 FFMPEG = VENDOR / ("ffmpeg.exe" if SYSTEM == "Windows" else "ffmpeg")
@@ -67,4 +69,11 @@ coll = COLLECT(
 )
 
 if SYSTEM == "Darwin":
-    app = BUNDLE(coll, name="Fotogramma.app", icon=str(ICON) if ICON.is_file() else None, bundle_identifier="net.tassoni.fotogramma.desktop")
+    app = BUNDLE(
+        coll,
+        name="Fotogramma.app",
+        icon=str(ICON) if ICON.is_file() else None,
+        bundle_identifier="net.tassoni.fotogramma.desktop",
+        version=APP_VERSION,
+        info_plist={"CFBundleVersion": APP_VERSION, "NSHumanReadableCopyright": "MIT License"},
+    )

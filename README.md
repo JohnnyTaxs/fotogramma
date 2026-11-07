@@ -55,13 +55,11 @@ No content is downloaded, no torrent client is integrated, and no WebView is emb
 
 The portable build includes **Python, Qt, fonts, ffmpeg, and ffprobe**, so no installation is required on the destination computer.
 
-For macOS Apple Silicon:
+For macOS Apple Silicon, download `Fotogramma-Darwin-arm64.zip` from the [latest release](https://github.com/JohnnyTaxs/fotogramma/releases/latest), then extract it with Finder (double-click). The bundle is ad-hoc signed but not notarized, so Gatekeeper asks for confirmation on first launch: use **System Settings → Privacy & Security → Open Anyway** (on older macOS versions, right-click `Fotogramma.app` → **Open**).
 
-```text
-dist/Fotogramma-Darwin-arm64.zip
-```
+Do not extract the ZIP with `unzip` or tools that turn symbolic links into copies: Qt and Python frameworks rely on those links, and the app bundle would no longer start. The `ditto`-based archive keeps them intact, and `deployment/build.py` verifies the extracted bundle signature before publishing.
 
-Extract the archive, right-click `Fotogramma.app`, and choose **Open**. The bundle is ad-hoc signed but not notarized, so Gatekeeper may request confirmation.
+The portable build bundles `ffmpeg` and `ffprobe`, so no separate media tools are required.
 
 On Windows, run `Fotogramma.exe` inside the extracted folder. On Linux, run the `Fotogramma` binary. Each package must be built on its own operating system: PyInstaller is not a cross-compiler.
 

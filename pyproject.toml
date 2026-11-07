@@ -1,6 +1,6 @@
 [project]
 name = "fotogramma-desktop"
-version = "0.1.0"
+version = "1.0.3"
 description = "Native desktop H.265 library inspector"
 requires-python = ">=3.10"
 dependencies = ["PySide6-Essentials>=6.8,<7"]

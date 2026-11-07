@@ -39,6 +39,7 @@ class ReleaseHandler(BaseHTTPRequestHandler):
             self.__class__.release = {
                 "id": 42,
                 "tag_name": payload["tag_name"],
+                "body": payload.get("body", ""),
                 "html_url": "https://github.com/JohnnyTaxs/fotogramma/releases/tag/v1.0.0",
                 "upload_url": upload_url,
                 "assets": [],
@@ -60,6 +61,15 @@ class ReleaseHandler(BaseHTTPRequestHandler):
                 self.send_error(404)
             else:
                 self._json(200, {**self.release, "assets": self.assets})
+            return
+        self.send_error(404)
+
+    def do_PATCH(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(length))
+        if self.path == "/api/v3/repos/JohnnyTax/fotogramma-desktop/releases/42":
+            self.__class__.release.update(payload)
+            self._json(200, {**self.release, "assets": self.assets})
             return
         self.send_error(404)
 
@@ -116,6 +126,30 @@ class CreateReleaseTests(unittest.TestCase):
         self.assertEqual(len(ReleaseHandler.assets), 2)
         self.assertNotIn("secret-token", output.getvalue())
         self.assertEqual(ReleaseHandler.release["tag_name"], "v1.0.0")
+
+    def test_release_notes_are_created_and_updated(self):
+        env = {
+            "GITHUB_TOKEN": "secret-token",
+            "GITHUB_API_URL": f"http://127.0.0.1:{self.port}/api/v3",
+            "GITHUB_REPOSITORY": "JohnnyTax/fotogramma-desktop",
+            "GITHUB_REF_NAME": "v1.0.0",
+            "NO_PROXY": "127.0.0.1,localhost",
+            "no_proxy": "127.0.0.1,localhost",
+        }
+        with tempfile.TemporaryDirectory() as notes_dir, tempfile.TemporaryDirectory() as directory:
+            notes = Path(notes_dir, "v1.0.0.md")
+            notes.write_text("# Note\n\nFirst body.", encoding="utf-8")
+            Path(directory, "Fotogramma-Linux-x86_64.zip").write_bytes(b"linux")
+            with (
+                patch.dict(os.environ, env, clear=True),
+                patch.object(sys, "argv", ["create_release.py", directory]),
+                patch("deployment.create_release.NOTES_DIR", Path(notes_dir)),
+            ):
+                create_release()
+                self.assertEqual(ReleaseHandler.release["body"], "# Note\n\nFirst body.")
+                notes.write_text("# Note\n\nUpdated body.", encoding="utf-8")
+                create_release()
+        self.assertEqual(ReleaseHandler.release["body"], "# Note\n\nUpdated body.")
 
 
 if __name__ == "__main__":

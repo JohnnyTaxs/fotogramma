@@ -10,6 +10,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+ROOT = Path(__file__).resolve().parents[1]
+NOTES_DIR = ROOT / "docs" / "releases"
+
+
+def release_notes(tag: str) -> str:
+    """Return the notes file for this tag, empty when none is published."""
+    notes = NOTES_DIR / f"{tag}.md"
+    if notes.is_file():
+        return notes.read_text(encoding="utf-8").strip()
+    return ""
+
 
 class ReleaseClient:
     def __init__(self, api_url: str, repository: str, token: str) -> None:
@@ -35,14 +46,22 @@ class ReleaseClient:
             details = error.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"GitHub API {method} {path}: HTTP {error.code}: {details}") from error
 
-    def create_release(self, tag: str) -> dict:
+    def create_release(self, tag: str, body: str = "") -> dict:
         path = f"/repos/{self.repository}/releases"
+        payload = {"tag_name": tag, "name": f"Fotogramma {tag}", "draft": False, "prerelease": False}
+        if body:
+            payload["body"] = body
+        else:
+            payload["generate_release_notes"] = True
         try:
-            return self.request("POST", path, {"tag_name": tag, "name": f"Fotogramma {tag}", "draft": False, "prerelease": False})
+            return self.request("POST", path, payload)
         except RuntimeError as error:
             if "HTTP 422" not in str(error) and "HTTP 409" not in str(error):
                 raise
-        return self.request("GET", f"{path}/tags/{urllib.parse.quote(tag, safe='')}")
+        release = self.request("GET", f"{path}/tags/{urllib.parse.quote(tag, safe='')}")
+        if body and release.get("body") != body:
+            release = self.request("PATCH", f"{path}/{release['id']}", {"body": body})
+        return release
 
     def delete_asset_if_present(self, release: dict, name: str) -> None:
         for asset in release.get("assets", []):
@@ -80,7 +99,7 @@ def main() -> int:
     if not assets:
         raise SystemExit("No ZIP archives to publish")
     client = ReleaseClient(api_url, repository, token)
-    release = client.create_release(tag)
+    release = client.create_release(tag, release_notes(tag))
     for asset in assets:
         client.upload_asset(release, asset)
         print(f"Uploaded: {asset.name}")
