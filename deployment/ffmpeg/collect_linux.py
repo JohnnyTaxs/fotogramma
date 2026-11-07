@@ -117,6 +117,11 @@ def main() -> int:
             check=True,
         )
 
+    # ELF installs keep their symbol tables; strip them so the portable
+    # application stays inside the size budget. Dynamic symbols stay intact.
+    for path in relocatable:
+        subprocess.run(["strip", "--strip-unneeded", str(path)], check=True)
+
     for path in relocatable:
         dynamic = run("readelf", "-d", str(path))
         if "$ORIGIN/../lib" not in dynamic:

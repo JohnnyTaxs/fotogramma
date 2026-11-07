@@ -47,9 +47,9 @@ deployment/vendor/rust/<System>-<arch>/
 
 `collect_macos.py` copies non-system dylibs, rewrites install names to `@loader_path`, ad-hoc signs every Mach-O file, and verifies that both binaries start.
 
-`collect_linux.py` copies the FFmpeg sonames and non-glibc dependencies, sets an `$ORIGIN/../lib` runpath with `patchelf`, and verifies both binaries start.
+`collect_linux.py` copies the FFmpeg sonames and non-glibc dependencies, sets an `$ORIGIN/../lib` runpath with `patchelf`, strips the ELF symbol tables, and verifies both binaries start.
 
-`build_minimal_windows.sh` copies every non-system DLL next to the executables because Windows resolves them from the executable folder.
+`build_minimal_windows.sh` copies every non-system DLL next to the executables because Windows resolves them from the executable folder, then strips the PE files. The ELF and PE installs keep large symbol tables that would otherwise break the size budget.
 
 `deployment/vendor/` is ignored by Git. Rebuild it on each platform; do not commit binaries.
 

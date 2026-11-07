@@ -88,6 +88,10 @@ collect_dlls() {
 collect_dlls "$VENDOR/bin/ffmpeg.exe"
 collect_dlls "$VENDOR/bin/ffprobe.exe"
 
+# MinGW installs keep symbols in the PE files; strip them so the portable
+# application stays inside the size budget. Exports and relocations remain.
+strip --strip-unneeded "$VENDOR/bin/"*.exe "$VENDOR/bin/"*.dll
+
 "$VENDOR/bin/ffmpeg.exe" -hide_banner -version | head -n 1
 "$VENDOR/bin/ffprobe.exe" -hide_banner -version | head -n 1
 echo "Vendored toolchain: $VENDOR"
