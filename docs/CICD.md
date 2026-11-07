@@ -44,6 +44,16 @@ Il job usa `secrets.GITHUB_TOKEN` quando disponibile. `create_release.py` accett
 
 Alcune versioni di Forgejo ignorano il campo `permissions` del workflow: per questo il file non lo include più. Abilitare la pubblicazione tramite **Authorized Integrations**, assegnando al job/release il permesso di scrittura sulla repository. Se l’istanza non fornisce token automatici, creare un token Forgejo con permesso `write:repository` e aggiungerlo come secret `GITHUB_TOKEN` nelle impostazioni della repository. Il token non viene mai stampato nei log.
 
+## Servono macchine dedicate?
+
+No, non necessariamente macchine fisiche dedicate. PyInstaller non è un cross-compiler: ogni artefatto deve essere compilato sul proprio sistema operativo. Sono però necessari ambienti compatibili:
+
+- **Linux:** il solito runner Docker è sufficiente, con immagine `node:22-bookworm` e pacchetti `apt`.
+- **Windows:** un host o VM Windows con label `windows-latest` per produrre `Fotogramma.exe`.
+- **macOS ARM:** un host Apple Silicon con label `macos-15` per produrre `Fotogramma.app`; Intel non viene usato.
+
+Le VM self-hosted vanno bene, così come i runner cloud compatibili. Se non sono disponibili host Windows/macOS nel pool Forgejo, usare runner cloud con quei label oppure predisporre due VM dedicate al solo ruolo di runner.
+
 ## Requisiti dei runner
 
 I label `docker`, `windows-latest` e `macos-15` devono esistere nel pool Forgejo Actions. Se i runner self-hosted usano label diverse, aggiornare `matrix.os` nel workflow. I runner devono poter accedere a:
