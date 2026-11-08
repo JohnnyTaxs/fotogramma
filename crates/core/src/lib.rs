@@ -12,6 +12,7 @@ pub mod export;
 pub mod formatting;
 pub mod i18n;
 pub mod media_tools;
+pub mod queue;
 pub mod scanner;
 pub mod update;
 pub mod verification;

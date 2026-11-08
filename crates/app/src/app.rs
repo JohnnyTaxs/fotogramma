@@ -21,12 +21,13 @@ use crate::dialogs::{
     self, CloseChoice, ConversionDialog, ConversionPlan, ConversionSession, DialogOutcome,
     ProgressAction, UpdateAction, UpdateDialog, UpdateStage,
 };
-use crate::platform;
+use crate::platform::{self, PowerAction};
 use crate::settings::{Settings, KNOWN_CODECS};
 use crate::table::{self, FilterCategory, SortState, TableAction};
 use crate::theme;
 use crate::worker::{self, CheckMessage, ScanMessage};
 use fotogramma_core::i18n::{set_lang, tr_str, Lang};
+use fotogramma_core::queue::PendingQueue;
 use fotogramma_core::update::{self, InstallTarget};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -96,6 +97,10 @@ pub struct FotogrammaApp {
     started_at: Instant,
     last_size: Vec2,
     show_settings: bool,
+    /// A queue left over from a run that did not finish.
+    resume_offer: Option<PendingQueue>,
+    /// Sleep or shut down when this instant arrives, unless cancelled.
+    power_countdown: Option<(PowerAction, Instant)>,
     update_check: Option<Receiver<CheckMessage>>,
     update_manual: bool,
     update: Option<UpdateDialog>,
@@ -158,6 +163,11 @@ impl FotogrammaApp {
             started_at: Instant::now(),
             last_size: Vec2::new(1280.0, 820.0),
             show_settings: false,
+            resume_offer: crate::settings::queue_file()
+                .and_then(|file| PendingQueue::load(&file))
+                .map(PendingQueue::still_present)
+                .filter(|queue| !queue.videos.is_empty()),
+            power_countdown: None,
             update_check: None,
             update_manual: false,
             update: None,
@@ -484,6 +494,70 @@ impl FotogrammaApp {
 
         self.show_update_dialog(ctx);
 
+        // A queue that did not finish last time.
+        if let Some(count) = self.resume_offer.as_ref().map(|queue| queue.videos.len()) {
+            match dialogs::show_resume(ctx, count) {
+                Some(dialogs::ResumeChoice::Resume) => {
+                    if let Some(queue) = self.resume_offer.take() {
+                        let plan = ConversionPlan {
+                            videos: queue.videos,
+                            profile: queue.profile,
+                            destination_dir: queue.destination_dir,
+                            container: queue.container,
+                            replace_original: queue.replace_original,
+                            options: crate::worker::ConversionOptions {
+                                min_saving_percent: queue.min_saving_percent,
+                                prevent_sleep: self.settings.prevent_sleep,
+                                ..Default::default()
+                            },
+                            after: PowerAction::Nothing,
+                        };
+                        self.start_conversion(plan, ctx);
+                    }
+                }
+                Some(dialogs::ResumeChoice::Discard) => {
+                    self.resume_offer = None;
+                    if let Some(file) = crate::settings::queue_file() {
+                        PendingQueue::remove(&file);
+                    }
+                }
+                None => {}
+            }
+        }
+
+        // The queue ended: sleep or shut down after a countdown that can be cancelled.
+        let ended = self
+            .session
+            .as_mut()
+            .filter(|session| session.finished && !session.after_handled)
+            .map(|session| {
+                session.after_handled = true;
+                let stopped = session.failed || session.cancel.load(Ordering::Relaxed);
+                (session.after, stopped)
+            });
+        if let Some((action, stopped)) = ended {
+            if action != PowerAction::Nothing && !stopped && self.power_countdown.is_none() {
+                self.power_countdown = Some((action, Instant::now() + Duration::from_secs(60)));
+            }
+        }
+        if let Some((action, at)) = self.power_countdown {
+            let now = Instant::now();
+            if now >= at {
+                self.power_countdown = None;
+                action.run();
+            } else {
+                match dialogs::show_power_countdown(ctx, action, (at - now).as_secs() + 1) {
+                    Some(dialogs::PowerChoice::Now) => {
+                        self.power_countdown = None;
+                        action.run();
+                    }
+                    Some(dialogs::PowerChoice::Cancel) => self.power_countdown = None,
+                    None => {}
+                }
+                ctx.request_repaint_after(Duration::from_millis(500));
+            }
+        }
+
         let mut close_session = false;
         if let Some(session) = self.session.as_mut() {
             match dialogs::show_progress(ctx, session) {
@@ -589,7 +663,9 @@ impl FotogrammaApp {
         self.selected.retain(|path| convertible.contains(path));
     }
 
-    fn start_conversion(&mut self, plan: ConversionPlan, ctx: &egui::Context) {
+    fn start_conversion(&mut self, mut plan: ConversionPlan, ctx: &egui::Context) {
+        plan.options.queue_file = crate::settings::queue_file();
+        plan.options.pause = Arc::new(AtomicBool::new(false));
         let cancel = Arc::new(AtomicBool::new(false));
         let receiver = worker::spawn_conversion(
             plan.videos.clone(),
@@ -597,7 +673,7 @@ impl FotogrammaApp {
             plan.destination_dir.clone(),
             plan.container.clone(),
             plan.replace_original,
-            plan.options,
+            plan.options.clone(),
             cancel.clone(),
             ctx.clone(),
         );
@@ -1997,6 +2073,7 @@ mod small_snapshot_tests {
             container: "mkv".to_string(),
             replace_original: false,
             options: crate::worker::ConversionOptions::default(),
+            after: PowerAction::Nothing,
         };
         let session = ConversionSession::new(plan, receiver, Arc::new(AtomicBool::new(false)));
         for result in &results {

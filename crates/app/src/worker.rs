@@ -10,6 +10,7 @@ use fotogramma_core::conversion::{
 use fotogramma_core::formatting::SpaceChange;
 use fotogramma_core::i18n::tr_str;
 use fotogramma_core::media_tools::{ffmpeg_path, ffprobe_path, prepare_command};
+use fotogramma_core::queue::PendingQueue;
 use fotogramma_core::scanner::{discover_videos, probe_videos_cached, DiscoveryWarning, VideoInfo};
 use fotogramma_core::update::{self, InstallTarget, Release};
 use fotogramma_core::verification::{
@@ -153,13 +154,17 @@ fn run_scan(
 }
 
 /// What a conversion run is asked to do beyond the encoder settings.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ConversionOptions {
     /// Keep the original, and drop the result, when the new file saves less
     /// than this percentage. 0 keeps every result.
     pub min_saving_percent: u8,
     /// Keep the computer awake while the queue runs.
     pub prevent_sleep: bool,
+    /// Where to keep the queue while it runs, so it can be resumed.
+    pub queue_file: Option<PathBuf>,
+    /// While set, no new file starts (the one in progress finishes).
+    pub pause: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Debug)]
@@ -292,6 +297,25 @@ fn run_conversion(
     // Held until the queue ends, on this thread (Windows ties it to the thread).
     let _awake = crate::platform::SleepGuard::acquire(options.prevent_sleep);
     let ffprobe = ffprobe_path().ok();
+    let queue_file = options.queue_file.clone();
+    let save_queue = |remaining: &[VideoInfo]| {
+        if let Some(file) = &queue_file {
+            if remaining.is_empty() {
+                PendingQueue::remove(file);
+            } else {
+                let queue = PendingQueue::new(
+                    remaining.to_vec(),
+                    profile.clone(),
+                    destination_dir.clone(),
+                    container.clone(),
+                    replace_original,
+                    options.min_saving_percent,
+                );
+                let _ = queue.save(file);
+            }
+        }
+    };
+    save_queue(&videos);
     if !replace_original {
         std::fs::create_dir_all(&destination_dir).map_err(|error| error.to_string())?;
     }
@@ -299,6 +323,10 @@ fn run_conversion(
     let total = videos.len();
 
     for (index, video) in videos.iter().enumerate() {
+        // Paused: the file in progress was allowed to finish, the next waits.
+        while options.pause.load(Ordering::Relaxed) && !cancel.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(200));
+        }
         if cancel.load(Ordering::Relaxed) {
             break;
         }
@@ -377,7 +405,10 @@ fn run_conversion(
         let _ = sender.send(ConversionMessage::FileCompleted(Box::new(result.clone())));
         ctx.request_repaint();
         results.push(result);
+        save_queue(&videos[index + 1..]);
     }
+    // Finished or stopped on purpose: there is nothing to resume.
+    save_queue(&[]);
 
     let _ = sender.send(ConversionMessage::Completed(results));
     ctx.request_repaint();
@@ -926,7 +957,7 @@ mod tests {
             false,
             ConversionOptions {
                 min_saving_percent: 99,
-                prevent_sleep: false,
+                ..ConversionOptions::default()
             },
         );
         assert!(result.skipped && !result.success, "{}", result.message);
@@ -1088,6 +1119,116 @@ mod tests {
             "the two readable files come from the cache, the unreadable one is probed again"
         );
         assert_eq!(done.len(), 1, "the earlier conversion is still recognised");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_running_queue_is_saved_and_removed_when_it_ends() {
+        let Some((ffmpeg, ffprobe)) = tools() else {
+            eprintln!("skipped: no ffmpeg");
+            return;
+        };
+        let directory = scratch("queue");
+        let first = probe_video(
+            &clip(&ffmpeg, &directory, "a.mp4"),
+            &directory,
+            &ffprobe,
+            None,
+        )
+        .unwrap();
+        let second = probe_video(
+            &clip(&ffmpeg, &directory, "b.mp4"),
+            &directory,
+            &ffprobe,
+            None,
+        )
+        .unwrap();
+        let queue_file = directory.join("queue.json");
+        let profile = builtin_profiles()
+            .into_iter()
+            .find(|p| p.key == "fast")
+            .unwrap();
+        let receiver = spawn_conversion(
+            vec![first, second],
+            profile,
+            directory.join("out"),
+            "mkv".to_string(),
+            false,
+            ConversionOptions {
+                queue_file: Some(queue_file.clone()),
+                ..ConversionOptions::default()
+            },
+            Arc::new(AtomicBool::new(false)),
+            egui::Context::default(),
+        );
+        let mut saw_the_queue = false;
+        while let Ok(message) = receiver.recv_timeout(Duration::from_secs(120)) {
+            match message {
+                ConversionMessage::FileStarted { index: 1, .. } => {
+                    let queue = PendingQueue::load(&queue_file).expect("saved when it starts");
+                    assert_eq!(queue.videos.len(), 2);
+                    saw_the_queue = true;
+                }
+                ConversionMessage::FileStarted { index: 2, .. } => {
+                    let queue = PendingQueue::load(&queue_file).expect("still saved");
+                    assert_eq!(
+                        queue.videos.len(),
+                        1,
+                        "the finished file is gone from the queue"
+                    );
+                }
+                ConversionMessage::Completed(_) => break,
+                _ => {}
+            }
+        }
+        assert!(saw_the_queue);
+        assert!(!queue_file.exists(), "nothing to resume once it ended");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_paused_queue_waits_and_then_goes_on() {
+        let Some((ffmpeg, ffprobe)) = tools() else {
+            eprintln!("skipped: no ffmpeg");
+            return;
+        };
+        let directory = scratch("pause");
+        let video = probe_video(
+            &clip(&ffmpeg, &directory, "a.mp4"),
+            &directory,
+            &ffprobe,
+            None,
+        )
+        .unwrap();
+        let pause = Arc::new(AtomicBool::new(true));
+        let profile = builtin_profiles()
+            .into_iter()
+            .find(|p| p.key == "fast")
+            .unwrap();
+        let receiver = spawn_conversion(
+            vec![video],
+            profile,
+            directory.join("out"),
+            "mkv".to_string(),
+            false,
+            ConversionOptions {
+                pause: pause.clone(),
+                ..ConversionOptions::default()
+            },
+            Arc::new(AtomicBool::new(false)),
+            egui::Context::default(),
+        );
+        // Paused: nothing starts.
+        assert!(receiver.recv_timeout(Duration::from_millis(800)).is_err());
+        pause.store(false, Ordering::Relaxed);
+        let mut finished = false;
+        while let Ok(message) = receiver.recv_timeout(Duration::from_secs(120)) {
+            if matches!(message, ConversionMessage::Completed(_)) {
+                finished = true;
+                break;
+            }
+        }
+        assert!(finished, "it goes on once resumed");
         let _ = std::fs::remove_dir_all(&directory);
     }
 }

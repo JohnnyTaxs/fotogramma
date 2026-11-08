@@ -1,15 +1,16 @@
 //! Safe H.265 conversion profiles, output allocation and command generation.
 
 use crate::i18n::tr_str;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AudioMode {
     Copy,
     Aac,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConversionProfile {
     pub key: String,
     pub label: String,

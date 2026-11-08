@@ -158,6 +158,11 @@ pub fn cache_file() -> Option<PathBuf> {
     config_dir().map(|directory| directory.join("scan-cache.json"))
 }
 
+/// Where a running queue is kept. None in tests.
+pub fn queue_file() -> Option<PathBuf> {
+    config_dir().map(|directory| directory.join("queue.json"))
+}
+
 pub fn config_file() -> Option<PathBuf> {
     config_dir().map(|directory| directory.join("settings.toml"))
 }

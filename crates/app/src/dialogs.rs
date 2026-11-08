@@ -13,6 +13,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
+use crate::platform::PowerAction;
 use crate::settings::{Settings, KNOWN_CODECS};
 use crate::theme;
 use crate::worker::{ConversionMessage, ConversionOptions, ConversionResult, InstallMessage};
@@ -51,6 +52,10 @@ pub struct ConversionDialog {
     pub destination: String,
     pub replace_original: bool,
     pub options: ConversionOptions,
+    /// `list`, `largest` or `smallest`: which files go first.
+    pub order: String,
+    /// What to do with the computer when the queue ends.
+    pub after: PowerAction,
 }
 
 pub struct ConversionPlan {
@@ -60,6 +65,7 @@ pub struct ConversionPlan {
     pub container: String,
     pub replace_original: bool,
     pub options: ConversionOptions,
+    pub after: PowerAction,
 }
 
 pub enum DialogOutcome {
@@ -99,7 +105,10 @@ impl ConversionDialog {
             options: ConversionOptions {
                 min_saving_percent: defaults.min_saving_percent,
                 prevent_sleep: defaults.prevent_sleep,
+                ..ConversionOptions::default()
             },
+            order: "list".to_string(),
+            after: PowerAction::Nothing,
         };
         // A saved profile that no longer exists falls back to "balanced".
         if defaults.default_profile != "custom"
@@ -206,13 +215,20 @@ impl ConversionDialog {
                 PathBuf::from(self.destination.trim()),
             )
         };
+        let mut videos = self.videos.clone();
+        match self.order.as_str() {
+            "largest" => videos.sort_by_key(|video| std::cmp::Reverse(video.size.unwrap_or(0))),
+            "smallest" => videos.sort_by_key(|video| video.size.unwrap_or(0)),
+            _ => {}
+        }
         Ok(ConversionPlan {
-            videos: self.videos.clone(),
+            videos,
             profile,
             destination_dir,
             container,
             replace_original: self.replace_original,
-            options: self.options,
+            options: self.options.clone(),
+            after: self.after,
         })
     }
 
@@ -474,6 +490,40 @@ impl ConversionDialog {
                     .labelled_by(saving_label.id);
                 });
                 ui.end_row();
+
+                let order_label = ui.label(tr_str("Ordine", "Order"));
+                egui::ComboBox::from_id_salt("order-combo")
+                    .width(360.0)
+                    .selected_text(order_name(&self.order))
+                    .show_ui(ui, |ui| {
+                        for value in ["list", "largest", "smallest"] {
+                            ui.selectable_value(
+                                &mut self.order,
+                                value.to_string(),
+                                order_name(value),
+                            );
+                        }
+                    })
+                    .response
+                    .labelled_by(order_label.id);
+                ui.end_row();
+
+                let after_label = ui.label(tr_str("Al termine", "When finished"));
+                egui::ComboBox::from_id_salt("after-combo")
+                    .width(360.0)
+                    .selected_text(after_name(self.after))
+                    .show_ui(ui, |ui| {
+                        for value in [
+                            PowerAction::Nothing,
+                            PowerAction::Sleep,
+                            PowerAction::Shutdown,
+                        ] {
+                            ui.selectable_value(&mut self.after, value, after_name(value));
+                        }
+                    })
+                    .response
+                    .labelled_by(after_label.id);
+                ui.end_row();
             });
 
         if selected_profile != self.profile_key {
@@ -690,6 +740,28 @@ fn pixel_label(pixel: &str) -> &'static str {
     }
 }
 
+fn order_name(value: &str) -> &'static str {
+    match value {
+        "largest" => tr_str(
+            "Dal più grande (risparmio maggiore)",
+            "Largest first (most to gain)",
+        ),
+        "smallest" => tr_str(
+            "Dal più piccolo (risultati subito)",
+            "Smallest first (quick results)",
+        ),
+        _ => tr_str("Come nell’elenco", "As in the list"),
+    }
+}
+
+fn after_name(action: PowerAction) -> &'static str {
+    match action {
+        PowerAction::Nothing => tr_str("Non fare nulla", "Do nothing"),
+        PowerAction::Sleep => tr_str("Metti il computer in stop", "Put the computer to sleep"),
+        PowerAction::Shutdown => tr_str("Spegni il computer", "Shut the computer down"),
+    }
+}
+
 fn content_name(value: &str) -> &'static str {
     match value {
         "anime" => tr_str("Anime / animazione", "Anime / animation"),
@@ -762,6 +834,11 @@ pub struct ConversionSession {
     pub failed: bool,
     /// Space freed by the files that converted, known once the queue ends.
     pub space: Option<SpaceChange>,
+    /// Set to hold the next file back; the one in progress finishes.
+    pub pause: Arc<AtomicBool>,
+    /// What to do with the computer when the queue has ended.
+    pub after: PowerAction,
+    pub after_handled: bool,
 }
 
 /// `, 1,2 GB instead of 2,0 GB (-40%)` for one converted file.
@@ -795,6 +872,8 @@ impl ConversionSession {
         cancel: Arc<AtomicBool>,
     ) -> Self {
         Self {
+            pause: plan.options.pause.clone(),
+            after: plan.after,
             receiver,
             destination_dir: plan.destination_dir,
             replace_original: plan.replace_original,
@@ -806,6 +885,7 @@ impl ConversionSession {
             finished: false,
             failed: false,
             space: None,
+            after_handled: false,
         }
     }
 
@@ -994,6 +1074,15 @@ pub fn show_progress(ctx: &egui::Context, session: &mut ConversionSession) -> Pr
             };
             ui.label(RichText::new(heading).size(theme::PAGE_TITLE_SIZE).strong());
             ui.label(&session.label);
+            if !session.finished && session.pause.load(std::sync::atomic::Ordering::Relaxed) {
+                ui.label(
+                    RichText::new(tr_str(
+                        "In pausa: il file in corso finisce, poi la coda aspetta.",
+                        "Paused: the file in progress finishes, then the queue waits.",
+                    ))
+                    .color(theme::CORAL_HOVER),
+                );
+            }
             if let Some(space) = session.space {
                 let (text, color) = if space.is_saving() {
                     (
@@ -1058,6 +1147,19 @@ pub fn show_progress(ctx: &egui::Context, session: &mut ConversionSession) -> Pr
                         .clicked()
                 {
                     action = ProgressAction::OpenFolder;
+                }
+                if !session.finished {
+                    let paused = session.pause.load(std::sync::atomic::Ordering::Relaxed);
+                    let label = if paused {
+                        tr_str("Riprendi", "Resume")
+                    } else {
+                        tr_str("Pausa dopo il file", "Pause after this file")
+                    };
+                    if ui.add(theme::secondary_button(label)).clicked() {
+                        session
+                            .pause
+                            .store(!paused, std::sync::atomic::Ordering::Relaxed);
+                    }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if session.finished {
@@ -1795,6 +1897,93 @@ pub fn show_update(ctx: &egui::Context, dialog: &mut UpdateDialog, busy: bool) -
     action
 }
 
+/// "Interrupted conversions: resume?" shown at startup.
+pub enum ResumeChoice {
+    Resume,
+    Discard,
+}
+
+pub fn show_resume(ctx: &egui::Context, remaining: usize) -> Option<ResumeChoice> {
+    let mut choice = None;
+    egui::Modal::new(egui::Id::unique("resume-queue"))
+        .frame(modal_frame())
+        .show(ctx, |ui| {
+            ui.set_min_width(480.0);
+            ui.label(
+                RichText::new(tr_str("Conversioni interrotte", "Interrupted conversions"))
+                    .size(21.0)
+                    .strong(),
+            );
+            ui.label(fotogramma_core::tr!(
+                "L’ultima coda non è finita: restano {} video. Vuoi riprenderla?",
+                "The last queue did not finish: {} videos are left. Resume it?",
+                fotogramma_core::formatting::format_int(remaining)
+            ));
+            ui.add_space(8.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(theme::primary_button(tr_str("Riprendi", "Resume")))
+                    .clicked()
+                {
+                    choice = Some(ResumeChoice::Resume);
+                }
+                if ui
+                    .add(theme::secondary_button(tr_str("Scarta", "Discard")))
+                    .clicked()
+                {
+                    choice = Some(ResumeChoice::Discard);
+                }
+            });
+        });
+    choice
+}
+
+pub enum PowerChoice {
+    Now,
+    Cancel,
+}
+
+/// The countdown before the computer sleeps or shuts down.
+pub fn show_power_countdown(
+    ctx: &egui::Context,
+    action: PowerAction,
+    seconds_left: u64,
+) -> Option<PowerChoice> {
+    let mut choice = None;
+    egui::Modal::new(egui::Id::unique("power-countdown"))
+        .frame(modal_frame())
+        .show(ctx, |ui| {
+            ui.set_min_width(480.0);
+            ui.label(
+                RichText::new(tr_str("Conversione terminata", "Conversion finished"))
+                    .size(21.0)
+                    .strong(),
+            );
+            ui.label(fotogramma_core::tr!(
+                "{} tra {} secondi.",
+                "{} in {} seconds.",
+                after_name(action),
+                seconds_left
+            ));
+            ui.add_space(8.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(theme::primary_button(tr_str("Annulla", "Cancel")))
+                    .clicked()
+                {
+                    choice = Some(PowerChoice::Cancel);
+                }
+                if ui
+                    .add(theme::secondary_button(tr_str("Ora", "Now")))
+                    .clicked()
+                {
+                    choice = Some(PowerChoice::Now);
+                }
+            });
+        });
+    choice
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1933,6 +2122,7 @@ mod tests {
             container: "mkv".to_string(),
             replace_original: false,
             options: ConversionOptions::default(),
+            after: PowerAction::Nothing,
         };
         let mut session = ConversionSession::new(plan, receiver, Arc::new(AtomicBool::new(false)));
         for result in &results {
@@ -1988,5 +2178,38 @@ mod tests {
     fn no_sizes_means_no_summary() {
         let session = session_after(vec![finished_result("a.mkv", None, None, true)]);
         assert!(session.space.is_none());
+    }
+    #[test]
+    fn the_order_option_sorts_the_queue() {
+        let mut small = video("/Media/a.mkv");
+        small.size = Some(10);
+        let mut large = video("/Media/b.mkv");
+        large.size = Some(900);
+        let mut medium = video("/Media/c.mkv");
+        medium.size = Some(300);
+        let names = |dialog: &ConversionDialog| {
+            dialog
+                .plan()
+                .unwrap()
+                .videos
+                .iter()
+                .map(|v| v.path.file_name().unwrap().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        };
+        let mut dialog = ConversionDialog::new(
+            vec![small.clone(), large.clone(), medium.clone()],
+            &Settings::default(),
+        );
+        assert_eq!(dialog.order, "list");
+        assert_eq!(
+            names(&dialog),
+            vec!["a.mkv", "b.mkv", "c.mkv"],
+            "as selected"
+        );
+        dialog.order = "largest".into();
+        assert_eq!(dialog.plan().unwrap().videos[0].size, Some(900));
+        assert_eq!(dialog.plan().unwrap().videos[2].size, Some(10));
+        dialog.order = "smallest".into();
+        assert_eq!(dialog.plan().unwrap().videos[0].size, Some(10));
     }
 }

@@ -24,6 +24,59 @@ fn open_target(target: &str) {
     let _ = result;
 }
 
+/// What to do with the computer when a queue ends.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PowerAction {
+    #[default]
+    Nothing,
+    Sleep,
+    Shutdown,
+}
+
+impl PowerAction {
+    /// The program and arguments that carry the action out on this system.
+    pub fn command(self) -> Option<(&'static str, Vec<&'static str>)> {
+        if cfg!(target_os = "macos") {
+            match self {
+                PowerAction::Nothing => None,
+                PowerAction::Sleep => Some(("pmset", vec!["sleepnow"])),
+                PowerAction::Shutdown => Some((
+                    "osascript",
+                    vec!["-e", "tell application \"System Events\" to shut down"],
+                )),
+            }
+        } else if cfg!(windows) {
+            match self {
+                PowerAction::Nothing => None,
+                PowerAction::Sleep => Some((
+                    "rundll32.exe",
+                    vec!["powrprof.dll,SetSuspendState", "0,1,0"],
+                )),
+                PowerAction::Shutdown => Some(("shutdown", vec!["/s", "/t", "0"])),
+            }
+        } else {
+            match self {
+                PowerAction::Nothing => None,
+                PowerAction::Sleep => Some(("systemctl", vec!["suspend"])),
+                PowerAction::Shutdown => Some(("systemctl", vec!["poweroff"])),
+            }
+        }
+    }
+
+    pub fn run(self) {
+        if let Some((program, arguments)) = self.command() {
+            let mut command = Command::new(program);
+            command.args(arguments);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x0800_0000);
+            }
+            let _ = command.spawn();
+        }
+    }
+}
+
 /// Keeps the computer awake while it is alive: a laptop that goes to sleep in
 /// the middle of a long conversion simply stops it.
 ///
@@ -119,6 +172,19 @@ impl Drop for SleepGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn power_actions_map_to_a_command_except_doing_nothing() {
+        assert!(PowerAction::Nothing.command().is_none());
+        for action in [PowerAction::Sleep, PowerAction::Shutdown] {
+            let (program, arguments) = action.command().expect("a command");
+            assert!(!program.is_empty() && !arguments.is_empty());
+        }
+        assert_ne!(
+            PowerAction::Sleep.command(),
+            PowerAction::Shutdown.command()
+        );
+    }
 
     #[test]
     fn a_disabled_guard_holds_nothing() {
