@@ -26,7 +26,7 @@ eframe + egui (glow / OpenGL)
 
 ## Workspace
 
-`rust/Cargo.toml` defines a two-crate workspace, version `2.0.0`:
+`rust/Cargo.toml` defines a two-crate workspace, version `2.0.1`:
 
 | Crate | Responsibility |
 | --- | --- |
