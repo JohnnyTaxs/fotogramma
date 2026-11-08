@@ -330,6 +330,13 @@ impl FotogrammaApp {
                     self.scan_progress = None;
                     self.videos = videos;
                     reclassify(&mut self.videos, &self.settings.accepted_codecs);
+                    // File names in Japanese or Korean need a system font.
+                    theme::ensure_fallback_fonts(
+                        ctx,
+                        self.videos
+                            .iter()
+                            .flat_map(|video| [video.name.as_str(), video.folder.as_str()]),
+                    );
                     self.warnings = warnings;
                     self.cancelled = cancelled;
                     self.summary = summarize(&self.videos, None);
@@ -480,7 +487,13 @@ impl FotogrammaApp {
 
     fn show_dialogs(&mut self, ctx: &egui::Context) {
         if let Some(dialog) = self.conversion_dialog.as_mut() {
-            match dialog.show(ctx) {
+            let outcome = dialog.show(ctx);
+            if dialog.presets_dirty {
+                self.settings.presets = dialog.presets.clone();
+                self.settings.save();
+                dialog.presets_dirty = false;
+            }
+            match outcome {
                 DialogOutcome::Start(plan) => {
                     self.conversion_dialog = None;
                     self.start_conversion(*plan, ctx);
@@ -2206,6 +2219,38 @@ mod small_snapshot_tests {
                 app.update = Some(UpdateDialog::new(release, None));
                 app
             });
+        harness.run();
+    }
+
+    #[test]
+    fn japanese_file_names_are_drawn_once_a_system_font_is_found() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                let mut video = app.videos[3].clone();
+                video.name = "進撃の巨人 第1話.mkv".to_string();
+                video.relative_path = "アニメ/進撃の巨人 第1話.mkv".to_string();
+                video.folder = "アニメ".to_string();
+                video.path = PathBuf::from("/Filmati/アニメ/進撃の巨人 第1話.mkv");
+                app.videos.push(video);
+                theme::ensure_fallback_fonts(
+                    &cc.egui_ctx,
+                    app.videos
+                        .iter()
+                        .flat_map(|video| [video.name.as_str(), video.folder.as_str()]),
+                );
+                app.filter = FilterCategory::All;
+                app.query = "進撃".to_string();
+                app
+            });
+        if !theme::cjk_loaded() {
+            eprintln!("skipped: no system font for Japanese on this machine");
+            return;
+        }
+        // The test harness panics on a glyph nothing can draw, so reaching the
+        // end proves every character of the names has a font.
         harness.run();
     }
 }

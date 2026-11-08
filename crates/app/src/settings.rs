@@ -13,6 +13,19 @@ pub const KNOWN_CODECS: [(&str, &str); 4] = [
     ("vp9", "VP9 · WebM"),
 ];
 
+/// A named set of encoder settings the user saved from the custom profile.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedPreset {
+    pub name: String,
+    pub crf: u8,
+    pub preset: String,
+    pub pixel: String,
+    pub tune: String,
+    pub aq: Option<u8>,
+    pub audio_index: usize,
+    pub container: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
@@ -21,6 +34,9 @@ pub struct Settings {
     pub window_width: Option<f32>,
     #[serde(default)]
     pub window_height: Option<f32>,
+    /// The user's own presets.
+    #[serde(default)]
+    pub presets: Vec<SavedPreset>,
     /// Reuse the results of an earlier scan for files that did not change.
     #[serde(default = "default_true")]
     pub scan_cache: bool,
@@ -93,6 +109,7 @@ impl Default for Settings {
             window_height: None,
             language: default_language(),
             check_updates: true,
+            presets: Vec::new(),
             scan_cache: true,
             prevent_sleep: true,
             min_saving_percent: 0,
@@ -179,6 +196,16 @@ mod tests {
             window_height: Some(820.0),
             language: "en".to_string(),
             check_updates: false,
+            presets: vec![SavedPreset {
+                name: "Anime 1080p".to_string(),
+                crf: 20,
+                preset: "slow".to_string(),
+                pixel: "yuv420p10le".to_string(),
+                tune: "animation".to_string(),
+                aq: Some(3),
+                audio_index: 2,
+                container: "mkv".to_string(),
+            }],
             scan_cache: false,
             prevent_sleep: false,
             min_saving_percent: 15,
@@ -203,6 +230,9 @@ mod tests {
         assert!(!parsed.check_updates);
         assert!(!parsed.prevent_sleep);
         assert!(!parsed.scan_cache);
+        assert_eq!(parsed.presets.len(), 1);
+        assert_eq!(parsed.presets[0].name, "Anime 1080p");
+        assert_eq!(parsed.presets[0].aq, Some(3));
         assert_eq!(parsed.min_saving_percent, 15);
         assert_eq!(parsed.skipped_update, "v9.9.9");
     }
@@ -222,6 +252,7 @@ mod tests {
         assert!(parsed.check_updates);
         assert!(parsed.prevent_sleep);
         assert!(parsed.scan_cache);
+        assert!(parsed.presets.is_empty());
         assert_eq!(parsed.min_saving_percent, 0);
         assert!(parsed.skipped_update.is_empty());
     }

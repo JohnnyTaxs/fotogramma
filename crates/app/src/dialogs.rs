@@ -14,7 +14,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
 use crate::platform::PowerAction;
-use crate::settings::{Settings, KNOWN_CODECS};
+use crate::settings::{SavedPreset, Settings, KNOWN_CODECS};
 use crate::theme;
 use crate::worker::{ConversionMessage, ConversionOptions, ConversionResult, InstallMessage};
 use fotogramma_core::i18n::tr_str;
@@ -54,6 +54,13 @@ pub struct ConversionDialog {
     pub options: ConversionOptions,
     /// `list`, `largest` or `smallest`: which files go first.
     pub order: String,
+    /// The user's saved presets, and whether they changed in this dialog.
+    pub presets: Vec<SavedPreset>,
+    pub presets_dirty: bool,
+    /// The name typed to save the current settings.
+    pub preset_name: String,
+    /// The saved preset the settings were loaded from, if any.
+    pub loaded_preset: Option<String>,
     /// What to do with the computer when the queue ends.
     pub after: PowerAction,
 }
@@ -108,6 +115,10 @@ impl ConversionDialog {
                 ..ConversionOptions::default()
             },
             order: "list".to_string(),
+            presets: defaults.presets.clone(),
+            presets_dirty: false,
+            preset_name: String::new(),
+            loaded_preset: None,
             after: PowerAction::Nothing,
         };
         // A saved profile that no longer exists falls back to "balanced".
@@ -128,6 +139,69 @@ impl ConversionDialog {
         } else {
             None
         })
+    }
+
+    /// Save the settings of the custom profile under `name`, replacing a
+    /// preset of the same name. A blank name saves nothing.
+    pub fn save_preset(&mut self, name: &str) -> bool {
+        let name: String = name.trim().chars().take(40).collect();
+        if name.is_empty() {
+            return false;
+        }
+        let preset = SavedPreset {
+            name: name.clone(),
+            crf: self.crf,
+            preset: self.preset.clone(),
+            pixel: self.pixel.clone(),
+            tune: self.tune.clone(),
+            aq: self.aq,
+            audio_index: self.audio_index,
+            container: self.container.clone(),
+        };
+        match self
+            .presets
+            .iter_mut()
+            .find(|existing| existing.name == name)
+        {
+            Some(existing) => *existing = preset,
+            None => self.presets.push(preset),
+        }
+        self.presets_dirty = true;
+        self.loaded_preset = Some(name);
+        true
+    }
+
+    /// Put a saved preset into the custom settings.
+    pub fn load_preset(&mut self, name: &str) -> bool {
+        let Some(preset) = self
+            .presets
+            .iter()
+            .find(|preset| preset.name == name)
+            .cloned()
+        else {
+            return false;
+        };
+        self.profile_key = "custom".to_string();
+        self.crf = preset.crf;
+        self.preset = preset.preset;
+        self.pixel = preset.pixel;
+        self.tune = preset.tune;
+        self.aq = preset.aq;
+        self.audio_index = preset.audio_index.min(audio_options().len() - 1);
+        self.container = preset.container;
+        self.loaded_preset = Some(preset.name);
+        true
+    }
+
+    pub fn delete_preset(&mut self, name: &str) {
+        let before = self.presets.len();
+        self.presets.retain(|preset| preset.name != name);
+        if self.presets.len() != before {
+            self.presets_dirty = true;
+        }
+        if self.loaded_preset.as_deref() == Some(name) {
+            self.loaded_preset = None;
+        }
     }
 
     fn kind_tune(&self) -> Option<String> {
@@ -300,6 +374,13 @@ impl ConversionDialog {
                                 &mut selected_profile,
                                 profile.key.clone(),
                                 profile.label.clone(),
+                            );
+                        }
+                        for preset in &self.presets {
+                            ui.selectable_value(
+                                &mut selected_profile,
+                                format!("saved:{}", preset.name),
+                                format!("• {}", preset.name),
                             );
                         }
                         ui.selectable_value(
@@ -526,8 +607,11 @@ impl ConversionDialog {
                 ui.end_row();
             });
 
-        if selected_profile != self.profile_key {
+        if let Some(name) = selected_profile.strip_prefix("saved:") {
+            self.load_preset(name);
+        } else if selected_profile != self.profile_key {
             self.profile_key = selected_profile;
+            self.loaded_preset = None;
             self.apply_profile();
         }
 
@@ -555,6 +639,41 @@ impl ConversionDialog {
             ui.label(RichText::new(text).small().color(theme::MUTED));
         }
         ui.add_space(4.0);
+
+        if self.profile_key == "custom" {
+            ui.horizontal(|ui| {
+                let name_label = ui.label(tr_str("Nome del preset", "Preset name"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.preset_name)
+                        .hint_text(tr_str("es. Anime 1080p", "e.g. Anime 1080p"))
+                        .desired_width(200.0),
+                )
+                .labelled_by(name_label.id);
+                let name = self.preset_name.clone();
+                if ui
+                    .add_enabled(
+                        !name.trim().is_empty(),
+                        theme::secondary_button(tr_str("Salva preset", "Save preset")),
+                    )
+                    .clicked()
+                    && self.save_preset(&name)
+                {
+                    self.preset_name.clear();
+                }
+                if let Some(loaded) = self.loaded_preset.clone() {
+                    if ui
+                        .add(theme::secondary_button(fotogramma_core::tr!(
+                            "Elimina «{}»",
+                            "Delete “{}”",
+                            loaded
+                        )))
+                        .clicked()
+                    {
+                        self.delete_preset(&loaded);
+                    }
+                }
+            });
+        }
 
         ui.group(|ui| {
             ui.set_min_width(ui.available_width());
@@ -2211,5 +2330,101 @@ mod tests {
         assert_eq!(dialog.plan().unwrap().videos[2].size, Some(10));
         dialog.order = "smallest".into();
         assert_eq!(dialog.plan().unwrap().videos[0].size, Some(10));
+    }
+
+    #[test]
+    fn a_saved_preset_comes_back_with_every_setting() {
+        let mut dialog = ConversionDialog::new(vec![video("/Media/a.mkv")], &Settings::default());
+        dialog.profile_key = "custom".into();
+        dialog.crf = 19;
+        dialog.preset = "slower".into();
+        dialog.pixel = "yuv420p10le".into();
+        dialog.tune = "grain".into();
+        dialog.aq = Some(2);
+        dialog.audio_index = 2;
+        dialog.container = "mp4".into();
+        assert!(dialog.save_preset("  Film grain  "));
+        assert!(dialog.presets_dirty);
+        assert_eq!(dialog.presets.len(), 1);
+        assert_eq!(dialog.presets[0].name, "Film grain");
+
+        // Something else is chosen, then the preset is loaded back.
+        dialog.profile_key = "balanced".into();
+        dialog.crf = 30;
+        dialog.tune = String::new();
+        assert!(dialog.load_preset("Film grain"));
+        assert_eq!(dialog.profile_key, "custom");
+        assert_eq!(
+            (dialog.crf, dialog.preset.as_str(), dialog.tune.as_str()),
+            (19, "slower", "grain")
+        );
+        assert_eq!(
+            (dialog.aq, dialog.audio_index, dialog.container.as_str()),
+            (Some(2), 2, "mp4")
+        );
+        let args = arguments(&dialog);
+        assert!(has(&args, ["-crf", "19"]) && has(&args, ["-tune", "grain"]));
+        assert!(!dialog.load_preset("missing"));
+    }
+
+    #[test]
+    fn saving_under_the_same_name_replaces_and_blank_names_are_refused() {
+        let mut dialog = ConversionDialog::new(vec![video("/Media/a.mkv")], &Settings::default());
+        dialog.crf = 18;
+        assert!(dialog.save_preset("Mine"));
+        dialog.crf = 25;
+        assert!(dialog.save_preset("Mine"));
+        assert_eq!(dialog.presets.len(), 1);
+        assert_eq!(dialog.presets[0].crf, 25);
+        assert!(!dialog.save_preset("   "));
+        assert_eq!(dialog.presets.len(), 1);
+        assert!(dialog.save_preset(&"x".repeat(100)));
+        assert_eq!(
+            dialog.presets[1].name.chars().count(),
+            40,
+            "long names are cut"
+        );
+    }
+
+    #[test]
+    fn deleting_a_preset_forgets_it() {
+        let mut dialog = ConversionDialog::new(vec![video("/Media/a.mkv")], &Settings::default());
+        dialog.save_preset("A");
+        dialog.save_preset("B");
+        dialog.presets_dirty = false;
+        dialog.delete_preset("A");
+        assert_eq!(
+            dialog
+                .presets
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["B"]
+        );
+        assert!(dialog.presets_dirty);
+        dialog.presets_dirty = false;
+        dialog.delete_preset("nope");
+        assert!(!dialog.presets_dirty);
+    }
+
+    #[test]
+    fn saved_presets_from_the_settings_are_offered() {
+        let settings = Settings {
+            presets: vec![SavedPreset {
+                name: "Anime 1080p".into(),
+                crf: 20,
+                preset: "slow".into(),
+                pixel: "yuv420p10le".into(),
+                tune: "animation".into(),
+                aq: Some(3),
+                audio_index: 0,
+                container: "mkv".into(),
+            }],
+            ..Settings::default()
+        };
+        let mut dialog = ConversionDialog::new(vec![video("/Media/a.mkv")], &settings);
+        assert_eq!(dialog.presets.len(), 1);
+        assert!(dialog.load_preset("Anime 1080p"));
+        assert!(has(&arguments(&dialog), ["-tune", "animation"]));
     }
 }

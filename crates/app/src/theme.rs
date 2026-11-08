@@ -5,7 +5,8 @@ use eframe::egui::{
     Visuals,
 };
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 pub const BG: Color32 = Color32::from_rgb(0x28, 0x15, 0x2f);
 pub const BG_DEEP: Color32 = Color32::from_rgb(0x21, 0x11, 0x27);
@@ -67,6 +68,7 @@ pub fn install(ctx: &eframe::egui::Context) {
         .entry(FontFamily::Monospace)
         .or_default()
         .insert(0, "plex-mono".to_string());
+    *BASE_FONTS.lock().unwrap_or_else(|error| error.into_inner()) = Some(fonts.clone());
     ctx.set_fonts(fonts);
 
     ctx.set_theme(eframe::egui::ThemePreference::Dark);
@@ -162,4 +164,147 @@ pub fn card_frame() -> eframe::egui::Frame {
         .stroke(Stroke::new(1.0, LINE))
         .corner_radius(CornerRadius::same(16))
         .inner_margin(eframe::egui::Margin::same(18))
+}
+
+// ---- fonts for scripts the interface font does not have ----------------------
+//
+// Outfit covers Latin. A library of anime has file names in Japanese (and
+// sometimes Korean), which would be drawn as empty boxes. Windows, macOS and
+// most Linux desktops already ship fonts for them, so those are borrowed, and
+// only when a scan actually finds such names: the Korean font of macOS alone
+// is 55 MB, too much to read at every start.
+
+static BASE_FONTS: Mutex<Option<FontDefinitions>> = Mutex::new(None);
+/// A font for each script is looked for once, found or not.
+static CJK_TRIED: AtomicBool = AtomicBool::new(false);
+static HANGUL_TRIED: AtomicBool = AtomicBool::new(false);
+static CJK_FOUND: AtomicBool = AtomicBool::new(false);
+
+const CJK_FONTS: &[&str] = &[
+    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    r"C:\Windows\Fonts\YuGothM.ttc",
+    r"C:\Windows\Fonts\msyh.ttc",
+    r"C:\Windows\Fonts\meiryo.ttc",
+    r"C:\Windows\Fonts\simsun.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+];
+
+const HANGUL_FONTS: &[&str] = &[
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+    r"C:\Windows\Fonts\malgun.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+];
+
+/// Whether a font for Japanese and Chinese names has been found and loaded.
+#[cfg(test)]
+pub fn cjk_loaded() -> bool {
+    CJK_FOUND.load(Ordering::Relaxed)
+}
+
+/// `(needs a CJK font, needs a Hangul font)` for a piece of text.
+pub fn scripts_needed(text: &str) -> (bool, bool) {
+    let (mut cjk, mut hangul) = (false, false);
+    for character in text.chars() {
+        match character as u32 {
+            0x3000..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xFF00..=0xFFEF => cjk = true,
+            0x1100..=0x11FF | 0x3130..=0x318F | 0xAC00..=0xD7AF => hangul = true,
+            _ => {}
+        }
+        if cjk && hangul {
+            break;
+        }
+    }
+    (cjk, hangul)
+}
+
+fn first_font(candidates: &[&str]) -> Option<(String, Vec<u8>)> {
+    candidates.iter().find_map(|path| {
+        std::fs::read(path)
+            .ok()
+            .map(|bytes| ((*path).to_string(), bytes))
+    })
+}
+
+/// Load, once, a system font for each script found in `texts`.
+pub fn ensure_fallback_fonts<'a>(
+    ctx: &eframe::egui::Context,
+    texts: impl IntoIterator<Item = &'a str>,
+) {
+    let (mut cjk, mut hangul) = (false, false);
+    for text in texts {
+        let (c, h) = scripts_needed(text);
+        cjk |= c;
+        hangul |= h;
+        if cjk && hangul {
+            break;
+        }
+    }
+    let want_cjk = cjk && !CJK_TRIED.load(Ordering::Relaxed);
+    let want_hangul = hangul && !HANGUL_TRIED.load(Ordering::Relaxed);
+    if !want_cjk && !want_hangul {
+        return;
+    }
+    let mut base = BASE_FONTS.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(fonts) = base.as_mut() else {
+        return;
+    };
+    let mut changed = false;
+    for (wanted, flag, candidates, name) in [
+        (want_cjk, &CJK_TRIED, CJK_FONTS, "system-cjk"),
+        (want_hangul, &HANGUL_TRIED, HANGUL_FONTS, "system-hangul"),
+    ] {
+        if !wanted {
+            continue;
+        }
+        // Found or not, do not look again.
+        flag.store(true, Ordering::Relaxed);
+        if let Some((_, bytes)) = first_font(candidates) {
+            fonts
+                .font_data
+                .insert(name.to_string(), Arc::new(FontData::from_owned(bytes)));
+            for family in [FontFamily::Proportional, FontFamily::Monospace] {
+                fonts
+                    .families
+                    .entry(family)
+                    .or_default()
+                    .push(name.to_string());
+            }
+            changed = true;
+            if name == "system-cjk" {
+                CJK_FOUND.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+    if changed {
+        ctx.set_fonts(fonts.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scripts_are_detected_in_file_names() {
+        assert_eq!(scripts_needed("Frieren - S01E01.mkv"), (false, false));
+        assert_eq!(scripts_needed("Café déjà vu"), (false, false));
+        assert_eq!(scripts_needed("進撃の巨人"), (true, false));
+        assert_eq!(scripts_needed("ひらがな カタカナ"), (true, false));
+        assert_eq!(scripts_needed("기생충"), (false, true));
+        assert_eq!(scripts_needed("進撃 기생충"), (true, true));
+        assert_eq!(
+            scripts_needed("Ｆｕｌｌ"),
+            (true, false),
+            "full-width Latin needs a CJK font"
+        );
+    }
 }
