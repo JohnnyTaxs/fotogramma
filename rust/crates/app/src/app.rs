@@ -471,44 +471,65 @@ impl FotogrammaApp {
                     self.scan_progress
                         .clone()
                         .unwrap_or((0, None, String::new()));
-                ui.horizontal(|ui| {
-                    match total {
-                        Some(total) => {
-                            ui.add(
-                                egui::ProgressBar::new(if total == 0 {
-                                    0.0
-                                } else {
-                                    processed as f32 / total as f32
-                                })
-                                .desired_height(8.0)
-                                .fill(theme::CORAL),
+                // The stop button keeps the right edge; the bar and the counter
+                // share what is left, and the counter truncates instead of
+                // pushing the row past the window.
+                let cancelled = ui
+                    .horizontal(|ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let cancelled = ui.add(theme::secondary_button("Interrompi")).clicked();
+                            ui.with_layout(
+                                Layout::left_to_right(Align::Center),
+                                |ui| match total {
+                                    Some(total) => {
+                                        let fraction = if total == 0 {
+                                            0.0
+                                        } else {
+                                            processed as f32 / total as f32
+                                        };
+                                        let counter = format!(
+                                            "{} / {} · {current}",
+                                            format_int(processed),
+                                            format_int(total)
+                                        );
+                                        let width = counter_width(ui, &counter);
+                                        let bar_width = (ui.available_width() - width).max(60.0);
+                                        ui.add(
+                                            egui::ProgressBar::new(fraction)
+                                                .desired_height(8.0)
+                                                .desired_width(bar_width)
+                                                .fill(theme::CORAL),
+                                        );
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(counter).small().color(theme::MUTED),
+                                            )
+                                            .truncate(),
+                                        );
+                                    }
+                                    None => {
+                                        ui.add(egui::Spinner::new());
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(format!(
+                                                    "{} video trovati · {current}",
+                                                    format_int(processed)
+                                                ))
+                                                .small()
+                                                .color(theme::MUTED),
+                                            )
+                                            .truncate(),
+                                        );
+                                    }
+                                },
                             );
-                            ui.label(
-                                RichText::new(format!(
-                                    "{} / {} · {current}",
-                                    format_int(processed),
-                                    format_int(total)
-                                ))
-                                .small()
-                                .color(theme::MUTED),
-                            );
-                        }
-                        None => {
-                            ui.add(egui::Spinner::new());
-                            ui.label(
-                                RichText::new(format!(
-                                    "{} video trovati · {current}",
-                                    format_int(processed)
-                                ))
-                                .small()
-                                .color(theme::MUTED),
-                            );
-                        }
-                    }
-                    if ui.add(theme::secondary_button("Interrompi")).clicked() {
-                        self.cancel_scan();
-                    }
-                });
+                            cancelled
+                        })
+                    })
+                    .inner;
+                if cancelled.inner {
+                    self.cancel_scan();
+                }
             }
 
             if let Some(error) = &self.folder_error {
@@ -989,6 +1010,16 @@ fn home_directory() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Width of the scan counter, so the progress bar can reserve room for it.
+fn counter_width(ui: &egui::Ui, text: &str) -> f32 {
+    let font = egui::TextStyle::Small.resolve(ui.style());
+    ui.painter()
+        .layout_no_wrap(text.to_string(), font, theme::MUTED)
+        .size()
+        .x
+        + 10.0
+}
+
 fn chip(ui: &mut egui::Ui, text: &str, compatible: bool) {
     let (rect, _response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 66.0), Sense::hover());
@@ -1207,6 +1238,34 @@ mod snapshot_tests {
             .build_eframe(demo_app);
         harness.run();
         harness.snapshot("main-window");
+    }
+
+    #[test]
+    fn the_scan_row_stays_inside_the_window() {
+        use egui_kittest::kittest::Queryable;
+
+        for width in [1050.0, 1280.0, 2024.0] {
+            let mut harness = egui_kittest::Harness::builder()
+                .with_size(egui::vec2(width, 820.0))
+                .build_eframe(|cc| {
+                    let mut app = demo_app(cc);
+                    app.page = Page::Welcome;
+                    app.scanning = true;
+                    app.scan_progress = Some((96, Some(100), "Vacanze/Tramonto.mkv".to_string()));
+                    app
+                });
+            harness.run();
+            let stop = harness.get_by_label("Interrompi").rect();
+            assert!(
+                stop.right() <= width,
+                "the stop button ends at {} in a {width} wide window",
+                stop.right()
+            );
+            assert!(
+                stop.left() > width / 2.0,
+                "the stop button is pinned to the right edge"
+            );
+        }
     }
 
     #[test]
