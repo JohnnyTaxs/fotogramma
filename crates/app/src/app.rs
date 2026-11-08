@@ -25,6 +25,7 @@ use crate::settings::{Settings, KNOWN_CODECS};
 use crate::table::{self, FilterCategory, SortState, TableAction};
 use crate::theme;
 use crate::worker::{self, ScanMessage};
+use fotogramma_core::i18n::{set_lang, tr_str, Lang};
 
 #[derive(Clone, Debug, PartialEq)]
 enum Page {
@@ -97,6 +98,10 @@ impl FotogrammaApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::install(&cc.egui_ctx);
         let mut settings = Settings::load();
+        set_lang(Lang::resolve(
+            &settings.language,
+            system_locale().as_deref(),
+        ));
         let args = parse_args();
         if let Some(directory) = &args.directory {
             settings.directory = directory.clone();
@@ -198,7 +203,10 @@ impl FotogrammaApp {
                     if self.args.smoke_test {
                         self.close_after_scan_at = Some(Instant::now());
                     }
-                    self.set_status("Nessun file viene modificato", Duration::from_secs(4));
+                    self.set_status(
+                        tr_str("Nessun file viene modificato", "No file is modified"),
+                        Duration::from_secs(4),
+                    );
                     ctx.request_repaint();
                 }
                 ScanMessage::Failed(message) => {
@@ -215,18 +223,31 @@ impl FotogrammaApp {
 
     fn start_scan(&mut self, ctx: &egui::Context) {
         if self.scanning {
-            self.folder_error = Some("È già in corso un’analisi.".to_string());
+            self.folder_error = Some(
+                tr_str("È già in corso un’analisi.", "A scan is already running.").to_string(),
+            );
             return;
         }
         let directory = self.directory.trim().to_string();
         if directory.is_empty() {
-            self.folder_error = Some("Inserisci o scegli una cartella da analizzare.".to_string());
+            self.folder_error = Some(
+                tr_str(
+                    "Inserisci o scegli una cartella da analizzare.",
+                    "Enter or choose a folder to scan.",
+                )
+                .to_string(),
+            );
             return;
         }
         let path = PathBuf::from(&directory);
         if !path.is_dir() {
-            self.folder_error =
-                Some("La cartella indicata non esiste o non è accessibile.".to_string());
+            self.folder_error = Some(
+                tr_str(
+                    "La cartella indicata non esiste o non è accessibile.",
+                    "The folder does not exist or is not accessible.",
+                )
+                .to_string(),
+            );
             return;
         }
         self.folder_error = None;
@@ -364,6 +385,13 @@ impl FotogrammaApp {
     /// accepted-codec list shows up in the table and the home page at once.
     fn apply_settings(&mut self) {
         self.settings.save();
+        let before = fotogramma_core::i18n::lang();
+        let language = Lang::resolve(&self.settings.language, system_locale().as_deref());
+        set_lang(language);
+        if language != before {
+            // The engine label is built once: rebuild it in the new language.
+            (self.engine_status, self.engine_ok) = engine_status();
+        }
         reclassify(&mut self.videos, &self.settings.accepted_codecs);
         self.summary = summarize(&self.videos, None);
         let convertible: HashSet<PathBuf> = self
@@ -438,7 +466,10 @@ impl FotogrammaApp {
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.add(theme::secondary_button("Impostazioni")).clicked() {
+                if ui
+                    .add(theme::secondary_button(tr_str("Impostazioni", "Settings")))
+                    .clicked()
+                {
                     open_settings = true;
                 }
                 ui.add_space(8.0);
@@ -454,9 +485,12 @@ impl FotogrammaApp {
                 );
                 ui.add_space(16.0);
                 ui.label(
-                    RichText::new("Solo sul PC · Solo lettura")
-                        .small()
-                        .color(theme::MUTED),
+                    RichText::new(tr_str(
+                        "Solo sul PC · Solo lettura",
+                        "Local only · Read-only",
+                    ))
+                    .small()
+                    .color(theme::MUTED),
                 );
             });
         });
@@ -468,11 +502,14 @@ impl FotogrammaApp {
     fn control_deck(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         theme::card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new("Cartella della libreria").strong());
+            ui.label(RichText::new(tr_str("Cartella della libreria", "Library folder")).strong());
             ui.label(
-                RichText::new("Analisi ricorsiva di MP4, MKV e WebM. Nessuna modifica ai file.")
-                    .small()
-                    .color(theme::MUTED),
+                RichText::new(tr_str(
+                    "Analisi ricorsiva di MP4, MKV e WebM. Nessuna modifica ai file.",
+                    "Recursive scan of MP4, MKV and WebM. No file is modified.",
+                ))
+                .small()
+                .color(theme::MUTED),
             );
             ui.add_space(2.0);
             let mut browse = false;
@@ -481,16 +518,25 @@ impl FotogrammaApp {
             ui.horizontal(|ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     analyze = ui
-                        .add_enabled(!self.scanning, theme::primary_button("Analizza libreria"))
+                        .add_enabled(
+                            !self.scanning,
+                            theme::primary_button(tr_str("Analizza libreria", "Scan library")),
+                        )
                         .clicked();
                     browse = ui
-                        .add_enabled(!self.scanning, theme::secondary_button("Sfoglia"))
+                        .add_enabled(
+                            !self.scanning,
+                            theme::secondary_button(tr_str("Sfoglia", "Browse")),
+                        )
                         .clicked();
                     let edit = ui.add_sized(
                         [ui.available_width(), 34.0],
                         egui::TextEdit::singleline(&mut self.directory)
                             .font(theme::mono(11.0))
-                            .hint_text("Es. /Filmati oppure D:\\Video"),
+                            .hint_text(tr_str(
+                                "Es. /Filmati oppure D:\\Video",
+                                "E.g. /Movies or D:\\Video",
+                            )),
                     );
                     submit = edit.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
                 });
@@ -524,7 +570,9 @@ impl FotogrammaApp {
                 let cancelled = ui
                     .horizontal(|ui| {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let cancelled = ui.add(theme::secondary_button("Interrompi")).clicked();
+                            let cancelled = ui
+                                .add(theme::secondary_button(tr_str("Interrompi", "Stop")))
+                                .clicked();
                             ui.with_layout(
                                 Layout::left_to_right(Align::Center),
                                 |ui| match total {
@@ -570,8 +618,9 @@ impl FotogrammaApp {
                                         ui.add(egui::Spinner::new());
                                         ui.add(
                                             egui::Label::new(
-                                                RichText::new(format!(
-                                                    "{} video trovati · {current}",
+                                                RichText::new(fotogramma_core::tr!(
+                                                    "Video trovati: {} · {current}",
+                                                    "Videos found: {} · {current}",
                                                     format_int(processed)
                                                 ))
                                                 .small()
@@ -607,23 +656,25 @@ impl FotogrammaApp {
                     Layout::top_down(Align::LEFT),
                     |ui| {
                         ui.label(
-                            RichText::new("Pronta per H.265.")
+                            RichText::new(tr_str("Pronta per H.265.", "Ready for H.265."))
                                 .size(theme::HERO_SIZE)
                                 .strong(),
                         );
                         ui.add_space(2.0);
                         ui.label(
                             RichText::new(
-                                "Scegli una cartella e avvia l’analisi. Fotogramma separa i video già pronti \
-                                 da quelli che potresti convertire, senza spostare o modificare nulla.",
+                                tr_str(
+                                "Scegli una cartella e avvia l’analisi. Fotogramma separa i video già pronti da quelli che potresti convertire, senza spostare o modificare nulla.",
+                                "Choose a folder and start the scan. Fotogramma separates the videos that are already ready from those you could convert, without moving or changing anything.",
+                            ),
                             )
                             .color(theme::MUTED),
                         );
                         ui.add_space(18.0);
                         for (number, heading, description) in [
-                            ("01", "Scansione", "Lettura del primo flusso video tramite ffprobe."),
-                            ("02", "Selezione", "Filtri, ricerca e ordinamento per isolare i candidati."),
-                            ("03", "Esportazione", "Un file di testo con i soli percorsi da convertire."),
+                            ("01", tr_str("Scansione", "Scan"), tr_str("Lettura del primo flusso video tramite ffprobe.", "Reads the first video stream with ffprobe.")),
+                            ("02", tr_str("Selezione", "Select"), tr_str("Filtri, ricerca e ordinamento per isolare i candidati.", "Filters, search and sorting to isolate the candidates.")),
+                            ("03", tr_str("Esportazione", "Export"), tr_str("Un file di testo con i soli percorsi da convertire.", "A text file with only the paths to convert.")),
                         ] {
                             ui.label(
                                 RichText::new(format!("{number}  {heading}"))
@@ -658,7 +709,7 @@ impl FotogrammaApp {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.label(
-                    RichText::new("La tua libreria")
+                    RichText::new(tr_str("La tua libreria", "Your library"))
                         .size(theme::PAGE_TITLE_SIZE)
                         .strong(),
                 );
@@ -670,7 +721,10 @@ impl FotogrammaApp {
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
-                    .add(theme::primary_button("Esporta da convertire"))
+                    .add(theme::primary_button(tr_str(
+                        "Esporta da convertire",
+                        "Export to convert",
+                    )))
                     .clicked()
                 {
                     self.export_videos();
@@ -687,9 +741,10 @@ impl FotogrammaApp {
                 (
                     "all",
                     self.summary.total,
-                    "Video presenti",
-                    format!(
+                    tr_str("Video presenti", "Videos found"),
+                    fotogramma_core::tr!(
                         "{} analizzati",
+                        "{} analyzed",
                         format_bytes(Some(self.summary.total_bytes))
                     ),
                     theme::LAVENDER,
@@ -698,9 +753,10 @@ impl FotogrammaApp {
                 (
                     "convert",
                     self.summary.to_convert,
-                    "Da convertire",
-                    format!(
+                    tr_str("Da convertire", "To convert"),
+                    fotogramma_core::tr!(
                         "{} da elaborare",
+                        "{} to process",
                         format_bytes(Some(self.summary.to_convert_bytes))
                     ),
                     theme::CORAL,
@@ -709,7 +765,7 @@ impl FotogrammaApp {
                 (
                     "compatible",
                     self.summary.compatible,
-                    "Già compatibili",
+                    tr_str("Già compatibili", "Compatible"),
                     accepted_summary(&self.settings.accepted_codecs),
                     theme::MINT,
                     width,
@@ -717,8 +773,8 @@ impl FotogrammaApp {
                 (
                     "error",
                     self.summary.errors,
-                    "Non leggibili",
-                    "Da controllare".to_string(),
+                    tr_str("Non leggibili", "Unreadable"),
+                    tr_str("Da controllare", "To check").to_string(),
                     theme::ERROR,
                     width,
                 ),
@@ -740,13 +796,14 @@ impl FotogrammaApp {
         ui.add_space(10.0);
 
         let caption = if total > 0 {
-            format!(
+            fotogramma_core::tr!(
                 "{}% da convertire · {}% compatibili",
+                "{}% to convert · {}% compatible",
                 (self.summary.to_convert as f32 / total as f32 * 100.0).round() as u32,
                 (self.summary.compatible as f32 / total as f32 * 100.0).round() as u32
             )
         } else {
-            "Nessun video trovato".to_string()
+            tr_str("Nessun video trovato", "No videos found").to_string()
         };
         ui.horizontal(|ui| {
             let caption_width = 220.0;
@@ -774,10 +831,16 @@ impl FotogrammaApp {
         if self.cancelled || !self.warnings.is_empty() {
             let mut messages = Vec::new();
             if self.cancelled {
-                messages.push("Analisi interrotta: i risultati sono parziali.");
+                messages.push(tr_str(
+                    "Analisi interrotta: i risultati sono parziali.",
+                    "Scan stopped: the results are partial.",
+                ));
             }
             if !self.warnings.is_empty() {
-                messages.push("cartelle non accessibili: il riepilogo può essere incompleto.");
+                messages.push(tr_str(
+                    "cartelle non accessibili: il riepilogo può essere incompleto.",
+                    "folders not accessible: the summary may be incomplete.",
+                ));
             }
             let text = if self.warnings.is_empty() {
                 messages.join(" ")
@@ -802,13 +865,15 @@ impl FotogrammaApp {
         }
 
         let insight = if self.summary.to_convert > 0 {
-            format!(
-                "{} file richiedono un’azione. Selezionali nella tabella per cercare online o convertire direttamente.",
+            fotogramma_core::tr!(
+                "File da convertire: {}. Selezionali nella tabella per convertirli direttamente.",
+                "Files to convert: {}. Select them in the table to convert them directly.",
                 format_int(self.summary.to_convert)
             )
         } else {
-            format!(
+            fotogramma_core::tr!(
                 "Tutti i file sono già compatibili ({}): non serve alcuna conversione.",
+                "All files are already compatible ({}): no conversion needed.",
                 accepted_summary(&self.settings.accepted_codecs)
             )
         };
@@ -816,10 +881,22 @@ impl FotogrammaApp {
 
         ui.horizontal(|ui| {
             for (filter, label, tone) in [
-                (FilterCategory::All, "Tutti", theme::LAVENDER),
-                (FilterCategory::Convert, "Da convertire", theme::CORAL),
-                (FilterCategory::Compatible, "Compatibili", theme::MINT),
-                (FilterCategory::Error, "Errori", theme::ERROR),
+                (FilterCategory::All, tr_str("Tutti", "All"), theme::LAVENDER),
+                (
+                    FilterCategory::Convert,
+                    tr_str("Da convertire", "To convert"),
+                    theme::CORAL,
+                ),
+                (
+                    FilterCategory::Compatible,
+                    tr_str("Compatibili", "Compatible"),
+                    theme::MINT,
+                ),
+                (
+                    FilterCategory::Error,
+                    tr_str("Errori", "Errors"),
+                    theme::ERROR,
+                ),
             ] {
                 if filter_pill(ui, label, tone, self.filter == filter).clicked() {
                     self.filter = filter;
@@ -828,7 +905,8 @@ impl FotogrammaApp {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add_sized(
                     [340.0, 34.0],
-                    egui::TextEdit::singleline(&mut self.query).hint_text("Cerca nella libreria…"),
+                    egui::TextEdit::singleline(&mut self.query)
+                        .hint_text(tr_str("Cerca nella libreria…", "Search the library…")),
                 );
             });
         });
@@ -836,10 +914,15 @@ impl FotogrammaApp {
         let selected = self.selected_videos();
         ui.horizontal(|ui| {
             let label = if selected.is_empty() {
-                "Seleziona uno o più video da convertire per vedere le azioni".to_string()
+                tr_str(
+                    "Seleziona uno o più video da convertire per vedere le azioni",
+                    "Select one or more videos to convert to see the actions",
+                )
+                .to_string()
             } else {
-                format!(
-                    "{} video da convertire selezionati",
+                fotogramma_core::tr!(
+                    "Selezionati da convertire: {}",
+                    "Selected to convert: {}",
                     format_int(selected.len())
                 )
             };
@@ -848,9 +931,12 @@ impl FotogrammaApp {
                 if ui
                     .add_enabled(
                         !selected.is_empty(),
-                        theme::primary_button("Converti selezionati"),
+                        theme::primary_button(tr_str("Converti selezionati", "Convert selected")),
                     )
-                    .on_hover_text("Crea nuovi file H.265 senza modificare gli originali")
+                    .on_hover_text(tr_str(
+                        "Crea nuovi file H.265 senza modificare gli originali",
+                        "Creates new H.265 files without changing the originals",
+                    ))
                     .clicked()
                 {
                     self.conversion_dialog =
@@ -877,8 +963,9 @@ impl FotogrammaApp {
             None => {}
         }
         ui.label(
-            RichText::new(format!(
-                "{} video in questa vista",
+            RichText::new(fotogramma_core::tr!(
+                "Video in questa vista: {}",
+                "Videos in this view: {}",
                 format_int(visible.len())
             ))
             .small()
@@ -891,18 +978,18 @@ impl FotogrammaApp {
         ui.vertical_centered(|ui| {
             ui.add_space(60.0);
             ui.label(
-                RichText::new("L’analisi si è fermata")
+                RichText::new(tr_str("L’analisi si è fermata", "The scan stopped"))
                     .size(theme::PAGE_TITLE_SIZE)
                     .strong(),
             );
             ui.label(
-                RichText::new(format!(
-                    "{message}\n\nControlla la cartella e che ffprobe sia disponibile, poi riprova."
+                RichText::new(fotogramma_core::tr!(
+                    "{message}\n\nControlla la cartella e che ffprobe sia disponibile, poi riprova.", "{message}\n\nCheck the folder and that ffprobe is available, then try again."
                 ))
                 .color(theme::MUTED),
             );
             ui.add_space(8.0);
-            if ui.add(theme::primary_button("Riprova")).clicked() {
+            if ui.add(theme::primary_button(tr_str("Riprova", "Try again"))).clicked() {
                 self.start_scan(ctx);
             }
         });
@@ -916,14 +1003,17 @@ impl FotogrammaApp {
             .map(|video| video.path.to_string_lossy().into_owned())
             .collect();
         if convertible.is_empty() {
-            self.set_status("Nessun video da convertire", Duration::from_secs(4));
+            self.set_status(
+                tr_str("Nessun video da convertire", "No videos to convert"),
+                Duration::from_secs(4),
+            );
             return;
         }
         let default_file = home_directory().join("fotogramma-da-convertire.txt");
         let Some(target) = rfd::FileDialog::new()
             .set_file_name("fotogramma-da-convertire.txt")
             .set_directory(home_directory())
-            .add_filter("File di testo", &["txt"])
+            .add_filter(tr_str("File di testo", "Text file"), &["txt"])
             .save_file()
         else {
             return;
@@ -931,15 +1021,19 @@ impl FotogrammaApp {
         let _ = default_file;
         match std::fs::write(&target, format!("{}\n", convertible.join("\n"))) {
             Ok(()) => self.set_status(
-                format!(
-                    "Esportati {} percorsi in {}",
+                fotogramma_core::tr!(
+                    "Percorsi esportati: {} · {}",
+                    "Paths exported: {} · {}",
                     format_int(convertible.len()),
                     target.display()
                 ),
                 Duration::from_secs(7),
             ),
             Err(error) => self.set_status(
-                format!("Esportazione non riuscita: {error}"),
+                fotogramma_core::tr!(
+                    "Esportazione non riuscita: {error}",
+                    "Export failed: {error}"
+                ),
                 Duration::from_secs(7),
             ),
         }
@@ -1041,6 +1135,15 @@ impl eframe::App for FotogrammaApp {
     }
 }
 
+/// The operating system language, as a locale tag. Tests use a fixed value so
+/// the result never depends on the machine running them.
+fn system_locale() -> Option<String> {
+    if cfg!(test) {
+        return Some("it-IT".to_string());
+    }
+    sys_locale::get_locale()
+}
+
 fn engine_status() -> (String, bool) {
     match ffprobe_path() {
         Ok(path) => match ffprobe_version(&path) {
@@ -1049,12 +1152,21 @@ fn engine_status() -> (String, bool) {
                 if parts.len() > 2 {
                     (format!("ffprobe {}", parts[2]), true)
                 } else {
-                    ("ffprobe non disponibile".to_string(), false)
+                    (
+                        tr_str("ffprobe non disponibile", "ffprobe unavailable").to_string(),
+                        false,
+                    )
                 }
             }
-            None => ("ffprobe non disponibile".to_string(), false),
+            None => (
+                tr_str("ffprobe non disponibile", "ffprobe unavailable").to_string(),
+                false,
+            ),
         },
-        Err(_) => ("ffprobe mancante".to_string(), false),
+        Err(_) => (
+            tr_str("ffprobe mancante", "ffprobe missing").to_string(),
+            false,
+        ),
     }
 }
 
@@ -1164,9 +1276,9 @@ fn accepted_summary(accepted: &[String]) -> String {
         .map(|(_, label)| label.split(" · ").next().unwrap_or(label))
         .collect();
     if labels.is_empty() {
-        "Nessun codec accettato".to_string()
+        tr_str("Nessun codec accettato", "No accepted codec").to_string()
     } else {
-        labels.join(" oppure ")
+        labels.join(tr_str(" oppure ", " or "))
     }
 }
 
@@ -1214,6 +1326,24 @@ fn composition_bar(
 mod snapshot_tests {
     use super::*;
     use fotogramma_core::scanner::Category;
+
+    /// The language is process-wide, so every rendering test takes this lock
+    /// and starts in Italian; the English test cannot disturb the others.
+    static LANG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    pub(super) struct LangGuard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+    pub(super) fn lang_guard() -> LangGuard {
+        let guard = LANG_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        set_lang(Lang::It);
+        LangGuard(guard)
+    }
+
+    impl Drop for LangGuard {
+        fn drop(&mut self) {
+            set_lang(Lang::It);
+        }
+    }
 
     fn demo_video(
         name: &str,
@@ -1294,6 +1424,7 @@ mod snapshot_tests {
 
     #[test]
     fn main_window_renders() {
+        let _lang = lang_guard();
         let mut harness = egui_kittest::Harness::builder()
             .with_size(egui::vec2(1280.0, 820.0))
             .build_eframe(demo_app);
@@ -1303,6 +1434,7 @@ mod snapshot_tests {
 
     #[test]
     fn the_scan_row_stays_inside_the_window() {
+        let _lang = lang_guard();
         use egui_kittest::kittest::Queryable;
 
         for width in [1050.0, 1280.0, 2024.0] {
@@ -1316,7 +1448,7 @@ mod snapshot_tests {
                     app
                 });
             harness.run();
-            let stop = harness.get_by_label("Interrompi").rect();
+            let stop = harness.get_by_label(tr_str("Interrompi", "Stop")).rect();
             assert!(
                 stop.right() <= width,
                 "the stop button ends at {} in a {width} wide window",
@@ -1331,6 +1463,7 @@ mod snapshot_tests {
 
     #[test]
     fn conversion_dialog_renders() {
+        let _lang = lang_guard();
         let mut harness = egui_kittest::Harness::builder()
             .with_size(egui::vec2(1280.0, 820.0))
             .build_eframe(|cc| {
@@ -1349,11 +1482,12 @@ mod snapshot_tests {
 
 #[cfg(test)]
 mod small_snapshot_tests {
-    use super::snapshot_tests::demo_app;
+    use super::snapshot_tests::{demo_app, lang_guard};
     use super::*;
 
     #[test]
     fn main_window_small_renders() {
+        let _lang = lang_guard();
         let mut harness = egui_kittest::Harness::builder()
             .with_size(egui::vec2(1050.0, 680.0))
             .build_eframe(demo_app);
@@ -1363,6 +1497,7 @@ mod small_snapshot_tests {
 
     #[test]
     fn conversion_dialog_small_renders() {
+        let _lang = lang_guard();
         let mut harness = egui_kittest::Harness::builder()
             .with_size(egui::vec2(1050.0, 680.0))
             .build_eframe(|cc| {
@@ -1380,6 +1515,7 @@ mod small_snapshot_tests {
 
     #[test]
     fn accepted_codecs_reclassify_the_loaded_library() {
+        let _lang = lang_guard();
         let mut harness = egui_kittest::Harness::builder()
             .with_size(egui::vec2(1050.0, 680.0))
             .build_eframe(demo_app);
@@ -1401,5 +1537,25 @@ mod small_snapshot_tests {
             .filter(|v| v.codec.as_deref() == Some("hevc"))
             .all(|v| v.category == fotogramma_core::scanner::Category::Convert));
         assert_eq!(app.summary.errors, 1);
+    }
+
+    #[test]
+    fn the_interface_follows_the_language_setting() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.settings.language = "en".to_string();
+                app.apply_settings();
+                app
+            });
+        harness.run();
+        harness.get_by_label("Settings");
+        harness.get_by_label("Scan library");
+        harness.get_by_label("Convert selected");
+        assert!(harness.query_by_label("Impostazioni").is_none());
+        assert!(harness.query_by_label("Analizza libreria").is_none());
     }
 }

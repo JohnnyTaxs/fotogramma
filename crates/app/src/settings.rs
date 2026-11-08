@@ -21,6 +21,9 @@ pub struct Settings {
     pub window_width: Option<f32>,
     #[serde(default)]
     pub window_height: Option<f32>,
+    /// Interface language: `auto` (follow the system), `it` or `en`.
+    #[serde(default = "default_language")]
+    pub language: String,
     /// Codecs treated as already compatible.
     #[serde(default = "default_accepted_codecs")]
     pub accepted_codecs: Vec<String>,
@@ -33,6 +36,10 @@ pub struct Settings {
     /// Output container for new files: `mkv` or `mp4`.
     #[serde(default = "default_container")]
     pub default_container: String,
+}
+
+fn default_language() -> String {
+    "auto".to_string()
 }
 
 fn default_accepted_codecs() -> Vec<String> {
@@ -53,6 +60,7 @@ impl Default for Settings {
             directory: String::new(),
             window_width: None,
             window_height: None,
+            language: default_language(),
             accepted_codecs: default_accepted_codecs(),
             replace_original: false,
             default_profile: default_profile(),
@@ -121,6 +129,7 @@ mod tests {
             directory: "/Filmati".to_string(),
             window_width: Some(1280.0),
             window_height: Some(820.0),
+            language: "en".to_string(),
             accepted_codecs: vec!["h264".to_string()],
             replace_original: true,
             default_profile: "fast".to_string(),
@@ -133,6 +142,7 @@ mod tests {
         assert_eq!(parsed.accepted_codecs, vec!["h264".to_string()]);
         assert!(parsed.replace_original);
         assert_eq!(parsed.default_container, "mp4");
+        assert_eq!(parsed.language, "en");
     }
 
     #[test]
@@ -144,5 +154,6 @@ mod tests {
         assert!(!parsed.replace_original);
         assert_eq!(parsed.default_profile, "balanced");
         assert_eq!(parsed.default_container, "mkv");
+        assert_eq!(parsed.language, "auto");
     }
 }

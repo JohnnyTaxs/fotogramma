@@ -1187,7 +1187,7 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "fotogramma"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "eframe",
  "egui_extras",
@@ -1199,13 +1199,14 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "rfd",
  "serde",
+ "sys-locale",
  "toml",
  "winresource",
 ]
 
 [[package]]
 name = "fotogramma-core"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3112,6 +3113,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

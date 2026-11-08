@@ -15,13 +15,22 @@ use std::sync::Arc;
 use crate::settings::{Settings, KNOWN_CODECS};
 use crate::theme;
 use crate::worker::{ConversionMessage, ConversionResult};
+use fotogramma_core::i18n::tr_str;
 
-const AUDIO_OPTIONS: [(&str, Option<u32>); 4] = [
-    ("Originale · nessuna ricompressione", None),
-    ("AAC 128 kbps", Some(128)),
-    ("AAC 160 kbps", Some(160)),
-    ("AAC 256 kbps", Some(256)),
-];
+fn audio_options() -> [(&'static str, Option<u32>); 4] {
+    [
+        (
+            tr_str(
+                "Originale · nessuna ricompressione",
+                "Original · no re-encoding",
+            ),
+            None,
+        ),
+        ("AAC 128 kbps", Some(128)),
+        ("AAC 160 kbps", Some(160)),
+        ("AAC 256 kbps", Some(256)),
+    ]
+}
 
 pub struct ConversionDialog {
     pub videos: Vec<VideoInfo>,
@@ -102,7 +111,7 @@ impl ConversionDialog {
                 return profile;
             }
         }
-        let audio = AUDIO_OPTIONS[self.audio_index.min(AUDIO_OPTIONS.len() - 1)];
+        let audio = audio_options()[self.audio_index.min(audio_options().len() - 1)];
         custom_profile(
             self.crf,
             &self.preset,
@@ -120,7 +129,7 @@ impl ConversionDialog {
 
     fn plan(&self) -> Result<ConversionPlan, String> {
         let Some(first) = self.videos.first() else {
-            return Err("Nessun video selezionato.".to_string());
+            return Err(tr_str("Nessun video selezionato.", "No video selected.").to_string());
         };
         let profile = self.current_profile();
         let (container, destination_dir) = if self.replace_original {
@@ -130,9 +139,11 @@ impl ConversionDialog {
                 .map(|value| value.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
             if extension != "mkv" && extension != "mp4" {
-                return Err(
-                    "La sostituzione dell’originale è disponibile solo per MKV e MP4.".to_string(),
-                );
+                return Err(tr_str(
+                    "La sostituzione dell’originale è disponibile solo per MKV e MP4.",
+                    "Replacing the original is only available for MKV and MP4.",
+                )
+                .to_string());
             }
             (
                 extension,
@@ -144,7 +155,11 @@ impl ConversionDialog {
             )
         } else {
             if self.destination.trim().is_empty() {
-                return Err("Scegli una cartella di destinazione.".to_string());
+                return Err(tr_str(
+                    "Scegli una cartella di destinazione.",
+                    "Choose a destination folder.",
+                )
+                .to_string());
             }
             (
                 self.container.clone(),
@@ -162,7 +177,7 @@ impl ConversionDialog {
 
     fn preview(&self) -> String {
         let Some(first) = self.videos.first() else {
-            return "Nessun video selezionato.".to_string();
+            return tr_str("Nessun video selezionato.", "No video selected.").to_string();
         };
         let destination = if self.replace_original {
             let extension = first
@@ -171,13 +186,20 @@ impl ConversionDialog {
                 .map(|value| value.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
             if extension != "mkv" && extension != "mp4" {
-                return "La sostituzione dell’originale è disponibile solo per MKV e MP4."
-                    .to_string();
+                return tr_str(
+                    "La sostituzione dell’originale è disponibile solo per MKV e MP4.",
+                    "Replacing the original is only available for MKV and MP4.",
+                )
+                .to_string();
             }
             allocate_partial_path(&first.path).unwrap_or_else(|_| first.path.clone())
         } else {
             if self.destination.trim().is_empty() {
-                return "Scegli una cartella di destinazione.".to_string();
+                return tr_str(
+                    "Scegli una cartella di destinazione.",
+                    "Choose a destination folder.",
+                )
+                .to_string();
             }
             allocate_output_path(
                 &first.path,
@@ -205,13 +227,13 @@ impl ConversionDialog {
             .num_columns(2)
             .spacing([18.0, 4.0])
             .show(ui, |ui| {
-                let profile_label = ui.label("Profilo");
+                let profile_label = ui.label(tr_str("Profilo", "Profile"));
                 let profiles = builtin_profiles();
                 let selected_label = profiles
                     .iter()
                     .find(|profile| profile.key == self.profile_key)
                     .map(|profile| profile.label.clone())
-                    .unwrap_or_else(|| "Personalizzato".to_string());
+                    .unwrap_or_else(|| tr_str("Personalizzato", "Custom").to_string());
                 egui::ComboBox::from_id_salt("profile-combo")
                     .width(360.0)
                     .selected_text(selected_label)
@@ -226,14 +248,14 @@ impl ConversionDialog {
                         ui.selectable_value(
                             &mut selected_profile,
                             "custom".to_string(),
-                            "Personalizzato",
+                            tr_str("Personalizzato", "Custom"),
                         );
                     })
                     .response
                     .labelled_by(profile_label.id);
                 ui.end_row();
 
-                let crf_label = ui.label("CRF · qualità");
+                let crf_label = ui.label(tr_str("CRF · qualità", "CRF · quality"));
                 ui.add_enabled_ui(custom, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().slider_width = 300.0;
@@ -249,7 +271,7 @@ impl ConversionDialog {
                 });
                 ui.end_row();
 
-                let preset_label = ui.label("Preset · velocità");
+                let preset_label = ui.label(tr_str("Preset · velocità", "Preset · speed"));
                 ui.add_enabled_ui(custom, |ui| {
                     egui::ComboBox::from_id_salt("preset-combo")
                         .width(360.0)
@@ -264,7 +286,7 @@ impl ConversionDialog {
                 });
                 ui.end_row();
 
-                let pixel_field = ui.label("Formato pixel");
+                let pixel_field = ui.label(tr_str("Formato pixel", "Pixel format"));
                 ui.add_enabled_ui(custom, |ui| {
                     egui::ComboBox::from_id_salt("pixel-combo")
                         .width(360.0)
@@ -273,12 +295,15 @@ impl ConversionDialog {
                             ui.selectable_value(
                                 &mut self.pixel,
                                 "yuv420p10le".to_string(),
-                                "10-bit · banding ridotto",
+                                tr_str("10-bit · banding ridotto", "10-bit · less banding"),
                             );
                             ui.selectable_value(
                                 &mut self.pixel,
                                 "yuv420p".to_string(),
-                                "8-bit · massima compatibilità",
+                                tr_str(
+                                    "8-bit · massima compatibilità",
+                                    "8-bit · maximum compatibility",
+                                ),
                             );
                         })
                         .response
@@ -286,13 +311,17 @@ impl ConversionDialog {
                 });
                 ui.end_row();
 
-                let tune_field = ui.label("Ottimizzazione contenuto");
+                let tune_field = ui.label(tr_str("Ottimizzazione contenuto", "Content tuning"));
                 ui.add_enabled_ui(custom, |ui| {
                     egui::ComboBox::from_id_salt("tune-combo")
                         .width(360.0)
                         .selected_text(tune_label(&self.tune))
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.tune, String::new(), "Nessuno");
+                            ui.selectable_value(
+                                &mut self.tune,
+                                String::new(),
+                                tr_str("Nessuno", "None"),
+                            );
                             ui.selectable_value(
                                 &mut self.tune,
                                 "animation".to_string(),
@@ -306,16 +335,20 @@ impl ConversionDialog {
                 });
                 ui.end_row();
 
-                let aq_label = ui.label("Quantizzazione adattiva");
+                let aq_label = ui.label(tr_str("Quantizzazione adattiva", "Adaptive quantization"));
                 ui.add_enabled_ui(custom, |ui| {
                     egui::ComboBox::from_id_salt("aq-combo")
                         .width(360.0)
                         .selected_text(match self.aq {
-                            None => "Automatico".to_string(),
+                            None => tr_str("Automatico", "Automatic").to_string(),
                             Some(value) => format!("AQ mode {value}"),
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.aq, None, "Automatico");
+                            ui.selectable_value(
+                                &mut self.aq,
+                                None,
+                                tr_str("Automatico", "Automatic"),
+                            );
                             for value in 0..=3u8 {
                                 ui.selectable_value(
                                     &mut self.aq,
@@ -332,9 +365,9 @@ impl ConversionDialog {
                 let audio_label = ui.label("Audio");
                 egui::ComboBox::from_id_salt("audio-combo")
                     .width(360.0)
-                    .selected_text(AUDIO_OPTIONS[self.audio_index].0)
+                    .selected_text(audio_options()[self.audio_index].0)
                     .show_ui(ui, |ui| {
-                        for (index, (label, _)) in AUDIO_OPTIONS.iter().enumerate() {
+                        for (index, (label, _)) in audio_options().iter().enumerate() {
                             ui.selectable_value(&mut self.audio_index, index, *label);
                         }
                     })
@@ -342,7 +375,7 @@ impl ConversionDialog {
                     .labelled_by(audio_label.id);
                 ui.end_row();
 
-                let container_field = ui.label("Contenitore");
+                let container_field = ui.label(tr_str("Contenitore", "Container"));
                 ui.add_enabled_ui(!self.replace_original, |ui| {
                     egui::ComboBox::from_id_salt("container-combo")
                         .width(360.0)
@@ -351,7 +384,7 @@ impl ConversionDialog {
                             ui.selectable_value(
                                 &mut self.container,
                                 "mkv".to_string(),
-                                "MKV · consigliato",
+                                tr_str("MKV · consigliato", "MKV · recommended"),
                             );
                             ui.selectable_value(
                                 &mut self.container,
@@ -371,7 +404,7 @@ impl ConversionDialog {
         }
 
         let description = if self.profile_key == "custom" {
-            "Configura manualmente i parametri video. Audio e contenitore restano modificabili in ogni profilo.".to_string()
+            tr_str("Configura manualmente i parametri video. Audio e contenitore restano modificabili in ogni profilo.", "Configure the video parameters manually. Audio and container can be changed in every profile.").to_string()
         } else {
             builtin_profile(&self.profile_key)
                 .map(|profile| profile.description)
@@ -384,9 +417,15 @@ impl ConversionDialog {
             ui.set_min_width(ui.available_width());
             let destination_field = ui.label(
                 RichText::new(if self.replace_original {
-                    "Sostituzione solo dopo test completi"
+                    tr_str(
+                        "Sostituzione solo dopo test completi",
+                        "Replacement only after full tests",
+                    )
                 } else {
-                    "Destinazione · mai sovrascrivere"
+                    tr_str(
+                        "Destinazione · mai sovrascrivere",
+                        "Destination · never overwrite",
+                    )
                 })
                 .strong(),
             );
@@ -399,7 +438,10 @@ impl ConversionDialog {
                     .labelled_by(destination_field.id);
                 });
                 if ui
-                    .add_enabled(!self.replace_original, theme::secondary_button("Scegli…"))
+                    .add_enabled(
+                        !self.replace_original,
+                        theme::secondary_button(tr_str("Scegli…", "Choose…")),
+                    )
                     .clicked()
                 {
                     if let Some(selected) = rfd::FileDialog::new()
@@ -414,10 +456,10 @@ impl ConversionDialog {
 
         ui.checkbox(
                         &mut self.replace_original,
-                        "Sostituisci gli originali solo dopo verifica completa",
+                        tr_str("Sostituisci gli originali solo dopo verifica completa", "Replace the originals only after full verification"),
                     )
                     .on_hover_text(
-                        "Scrive prima un file temporaneo, esegue tutti i test e solo dopo sostituisce l’originale con backup di sicurezza",
+                        tr_str("Scrive prima un file temporaneo, esegue tutti i test e solo dopo sostituisce l’originale con backup di sicurezza", "Writes a temporary file first, runs every test, and only then replaces the original, keeping a safety backup"),
                     );
         if self.replace_original {
             if let Some(first) = self.videos.first() {
@@ -433,7 +475,13 @@ impl ConversionDialog {
         }
 
         ui.add_space(4.0);
-        ui.label(RichText::new("Anteprima del comando FFmpeg").strong());
+        ui.label(
+            RichText::new(tr_str(
+                "Anteprima del comando FFmpeg",
+                "FFmpeg command preview",
+            ))
+            .strong(),
+        );
         let mut preview = self.preview();
         ui.add(
             egui::TextEdit::multiline(&mut preview)
@@ -460,19 +508,21 @@ impl ConversionDialog {
                 ui.set_max_width(760.0);
                 ui.spacing_mut().item_spacing.y = 6.0;
                 ui.label(
-                    RichText::new("Converti in H.265")
+                    RichText::new(tr_str("Converti in H.265", "Convert to H.265"))
                         .size(theme::PAGE_TITLE_SIZE)
                         .strong(),
                 );
                 ui.label(
                     RichText::new(if self.replace_original {
-                        format!(
-                            "{} file. Gli originali saranno sostituiti solo dopo test completi.",
+                        fotogramma_core::tr!(
+                            "File: {}. Gli originali saranno sostituiti solo dopo test completi.",
+                            "Files: {}. The originals are replaced only after full tests.",
                             self.videos.len()
                         )
                     } else {
-                        format!(
-                            "{} file selezionati. Gli originali restano invariati.",
+                        fotogramma_core::tr!(
+                            "File selezionati: {}. Gli originali restano invariati.",
+                            "Files selected: {}. The originals stay unchanged.",
                             self.videos.len()
                         )
                     })
@@ -494,14 +544,23 @@ impl ConversionDialog {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let can_start = self.plan().is_ok();
                         if ui
-                            .add_enabled(can_start, theme::primary_button("Avvia conversione"))
+                            .add_enabled(
+                                can_start,
+                                theme::primary_button(tr_str(
+                                    "Avvia conversione",
+                                    "Start conversion",
+                                )),
+                            )
                             .clicked()
                         {
                             if let Ok(plan) = self.plan() {
                                 outcome = DialogOutcome::Start(Box::new(plan));
                             }
                         }
-                        if ui.add(theme::secondary_button("Annulla")).clicked() {
+                        if ui
+                            .add(theme::secondary_button(tr_str("Annulla", "Cancel")))
+                            .clicked()
+                        {
                             outcome = DialogOutcome::Cancel;
                         }
                     });
@@ -529,9 +588,12 @@ fn destination_start(destination: &str) -> PathBuf {
 
 fn pixel_label(pixel: &str) -> &'static str {
     if pixel == "yuv420p" {
-        "8-bit · massima compatibilità"
+        tr_str(
+            "8-bit · massima compatibilità",
+            "8-bit · maximum compatibility",
+        )
     } else {
-        "10-bit · banding ridotto"
+        tr_str("10-bit · banding ridotto", "10-bit · less banding")
     }
 }
 
@@ -540,7 +602,16 @@ fn tune_label(tune: &str) -> &'static str {
         "animation" => "Animation",
         "film" => "Film",
         "grain" => "Grain",
-        _ => "Nessuno",
+        _ => tr_str("Nessuno", "None"),
+    }
+}
+
+/// Name of a language setting: languages are shown in their own language.
+fn language_name(value: &str) -> &'static str {
+    match value {
+        "it" => "Italiano",
+        "en" => "English",
+        _ => tr_str("Automatico (sistema)", "Automatic (system)"),
     }
 }
 
@@ -548,7 +619,7 @@ fn container_label(container: &str) -> &'static str {
     if container == "mp4" {
         "MP4 · faststart"
     } else {
-        "MKV · consigliato"
+        tr_str("MKV · consigliato", "MKV · recommended")
     }
 }
 
@@ -595,7 +666,7 @@ impl ConversionSession {
             destination_dir: plan.destination_dir,
             replace_original: plan.replace_original,
             cancel,
-            label: "Preparazione…".to_string(),
+            label: tr_str("Preparazione…", "Preparing…").to_string(),
             percent: 0,
             log: Vec::new(),
             results: Vec::new(),
@@ -620,8 +691,9 @@ impl ConversionSession {
                             .map(|value| value.to_string_lossy().into_owned())
                             .unwrap_or_default()
                     );
-                    self.log.push(format!(
+                    self.log.push(fotogramma_core::tr!(
                         "Avvio: {}\nOutput: {}",
+                        "Start: {}\nOutput: {}",
                         source.display(),
                         destination.display()
                     ));
@@ -646,32 +718,46 @@ impl ConversionSession {
                     index,
                     current_file,
                 } => {
-                    self.label = format!(
+                    self.label = fotogramma_core::tr!(
                         "Verifica completa · {index} · {}",
+                        "Full verification · {index} · {}",
                         current_file
                             .file_name()
                             .map(|value| value.to_string_lossy().into_owned())
                             .unwrap_or_default()
                     );
-                    self.log
-                        .push("Verifica completa prima della sostituzione…".to_string());
+                    self.log.push(
+                        tr_str(
+                            "Verifica completa prima della sostituzione…",
+                            "Full verification before replacement…",
+                        )
+                        .to_string(),
+                    );
                 }
                 ConversionMessage::FileCompleted(result) => {
                     let result = *result;
                     if result.cancelled {
-                        self.log
-                            .push(format!("Interrotto: {}", result.source.display()));
+                        self.log.push(fotogramma_core::tr!(
+                            "Interrotto: {}",
+                            "Stopped: {}",
+                            result.source.display()
+                        ));
                     } else if result.verified {
-                        self.log.push(format!(
+                        self.log.push(fotogramma_core::tr!(
                             "Verifica superata ✓ · originale sostituito: {}",
+                            "Verification passed ✓ · original replaced: {}",
                             result.destination.display()
                         ));
                     } else if result.success {
-                        self.log
-                            .push(format!("Completato ✓ · {}", result.destination.display()));
+                        self.log.push(fotogramma_core::tr!(
+                            "Completato ✓ · {}",
+                            "Completed ✓ · {}",
+                            result.destination.display()
+                        ));
                     } else {
-                        self.log.push(format!(
+                        self.log.push(fotogramma_core::tr!(
                             "Errore su {}: {}",
+                            "Error on {}: {}",
                             result.destination.display(),
                             result.message
                         ));
@@ -684,11 +770,14 @@ impl ConversionSession {
                     let successes = self.results.iter().filter(|result| result.success).count();
                     let errors = self.results.len().saturating_sub(successes);
                     let replacements = self.results.iter().filter(|result| result.replaced).count();
-                    let mut summary =
-                        format!("Conversione terminata: {successes} riuscite, {errors} errori");
+                    let mut summary = fotogramma_core::tr!(
+                        "Conversione terminata: riuscite {successes}, errori {errors}",
+                        "Conversion finished: {successes} succeeded, {errors} failed"
+                    );
                     if replacements > 0 {
-                        summary.push_str(&format!(
-                            " · {replacements} originali sostituiti dopo verifica"
+                        summary.push_str(&fotogramma_core::tr!(
+                            " · originali sostituiti dopo verifica: {replacements}",
+                            " · originals replaced after verification: {replacements}"
                         ));
                     }
                     self.label = summary;
@@ -696,7 +785,8 @@ impl ConversionSession {
                 }
                 ConversionMessage::Failed(message) => {
                     self.log.push(message);
-                    self.label = "Conversione non riuscita".to_string();
+                    self.label =
+                        tr_str("Conversione non riuscita", "Conversion failed").to_string();
                     self.finished = true;
                     self.failed = true;
                 }
@@ -732,11 +822,11 @@ pub fn show_progress(ctx: &egui::Context, session: &mut ConversionSession) -> Pr
         .show(ctx, |ui| {
             ui.set_min_width(680.0);
             let heading = if session.failed {
-                "Conversione non riuscita"
+                tr_str("Conversione non riuscita", "Conversion failed")
             } else if session.finished {
-                "Conversione completata"
+                tr_str("Conversione completata", "Conversion completed")
             } else {
-                "Conversione in corso"
+                tr_str("Conversione in corso", "Conversion in progress")
             };
             ui.label(RichText::new(heading).size(theme::PAGE_TITLE_SIZE).strong());
             ui.label(&session.label);
@@ -747,9 +837,12 @@ pub fn show_progress(ctx: &egui::Context, session: &mut ConversionSession) -> Pr
             );
             if session.replace_original && !session.finished {
                 ui.label(
-                    RichText::new("Gli originali vengono toccati solo dopo la verifica completa.")
-                        .small()
-                        .color(theme::MUTED),
+                    RichText::new(tr_str(
+                        "Gli originali vengono toccati solo dopo la verifica completa.",
+                        "The originals are touched only after full verification.",
+                    ))
+                    .small()
+                    .color(theme::MUTED),
                 );
             }
             egui::ScrollArea::vertical()
@@ -765,16 +858,27 @@ pub fn show_progress(ctx: &egui::Context, session: &mut ConversionSession) -> Pr
             ui.horizontal(|ui| {
                 if session.finished
                     && session.successes() > 0
-                    && ui.add(theme::secondary_button("Apri cartella")).clicked()
+                    && ui
+                        .add(theme::secondary_button(tr_str(
+                            "Apri cartella",
+                            "Open folder",
+                        )))
+                        .clicked()
                 {
                     action = ProgressAction::OpenFolder;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if session.finished {
-                        if ui.add(theme::primary_button("Chiudi")).clicked() {
+                        if ui
+                            .add(theme::primary_button(tr_str("Chiudi", "Close")))
+                            .clicked()
+                        {
                             action = ProgressAction::Close;
                         }
-                    } else if ui.add(theme::secondary_button("Interrompi")).clicked() {
+                    } else if ui
+                        .add(theme::secondary_button(tr_str("Interrompi", "Stop")))
+                        .clicked()
+                    {
                         session.cancel();
                         action = ProgressAction::Cancel;
                     }
@@ -800,7 +904,7 @@ pub fn show_details(ctx: &egui::Context, video: &VideoInfo) -> bool {
                 .num_columns(2)
                 .spacing([16.0, 6.0])
                 .show(ui, |ui| {
-                    ui.label("Percorso");
+                    ui.label(tr_str("Percorso", "Path"));
                     ui.label(
                         RichText::new(video.path.display().to_string()).font(theme::mono(10.0)),
                     );
@@ -808,20 +912,20 @@ pub fn show_details(ctx: &egui::Context, video: &VideoInfo) -> bool {
                     ui.label("Codec");
                     ui.label(codec_label(video.codec.as_deref()));
                     ui.end_row();
-                    ui.label("Durata");
+                    ui.label(tr_str("Durata", "Duration"));
                     ui.label(format_duration(video.duration));
                     ui.end_row();
-                    ui.label("Risoluzione");
+                    ui.label(tr_str("Risoluzione", "Resolution"));
                     ui.label(format!(
                         "{} × {}",
                         video.width.unwrap_or(0),
                         video.height.unwrap_or(0)
                     ));
                     ui.end_row();
-                    ui.label("Dimensione");
+                    ui.label(tr_str("Dimensione", "Size"));
                     ui.label(format_bytes(video.size));
                     ui.end_row();
-                    ui.label("Stato");
+                    ui.label(tr_str("Stato", "Status"));
                     ui.label(video.status_label());
                     ui.end_row();
                 });
@@ -831,7 +935,10 @@ pub fn show_details(ctx: &egui::Context, video: &VideoInfo) -> bool {
             }
             ui.add_space(8.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add(theme::primary_button("Chiudi")).clicked() {
+                if ui
+                    .add(theme::primary_button(tr_str("Chiudi", "Close")))
+                    .clicked()
+                {
                     closed = true;
                 }
             });
@@ -850,14 +957,22 @@ pub fn show_close_confirm(ctx: &egui::Context) -> Option<CloseChoice> {
         .frame(modal_frame())
         .show(ctx, |ui| {
             ui.set_min_width(480.0);
-            ui.label(RichText::new("Analisi in corso").size(21.0).strong());
-            ui.label("Vuoi interrompere l’analisi e chiudere Fotogramma?");
+            ui.label(
+                RichText::new(tr_str("Analisi in corso", "Scan in progress"))
+                    .size(21.0)
+                    .strong(),
+            );
+            ui.label(tr_str(
+                "Vuoi interrompere l’analisi e chiudere Fotogramma?",
+                "Do you want to stop the scan and close Fotogramma?",
+            ));
             ui.add_space(8.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .add(
                         egui::Button::new(
-                            RichText::new("Interrompi e chiudi").color(theme::CORAL_INK),
+                            RichText::new(tr_str("Interrompi e chiudi", "Stop and close"))
+                                .color(theme::CORAL_INK),
                         )
                         .fill(theme::CORAL),
                     )
@@ -865,7 +980,10 @@ pub fn show_close_confirm(ctx: &egui::Context) -> Option<CloseChoice> {
                 {
                     choice = Some(CloseChoice::StopAndClose);
                 }
-                if ui.add(theme::secondary_button("Continua")).clicked() {
+                if ui
+                    .add(theme::secondary_button(tr_str("Continua", "Continue")))
+                    .clicked()
+                {
                     choice = Some(CloseChoice::KeepOpen);
                 }
             });
@@ -898,19 +1016,53 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
         .show(ctx, |ui| {
             ui.set_min_width(520.0);
             ui.set_max_width(560.0);
-            ui.label(RichText::new("Impostazioni").size(21.0).strong());
             ui.label(
-                RichText::new("Valori predefiniti. Si applicano subito e vengono ricordati.")
-                    .small()
-                    .color(theme::MUTED),
+                RichText::new(tr_str("Impostazioni", "Settings"))
+                    .size(21.0)
+                    .strong(),
+            );
+            ui.label(
+                RichText::new(tr_str(
+                    "Valori predefiniti. Si applicano subito e vengono ricordati.",
+                    "Default values. They apply immediately and are remembered.",
+                ))
+                .small()
+                .color(theme::MUTED),
             );
             ui.add_space(8.0);
 
-            ui.label(RichText::new("Codec già accettati").strong());
+            ui.horizontal(|ui| {
+                let language_label = ui.label(RichText::new(tr_str("Lingua", "Language")).strong());
+                egui::ComboBox::from_id_salt("settings-language")
+                    .width(240.0)
+                    .selected_text(language_name(&settings.language))
+                    .show_ui(ui, |ui| {
+                        for value in ["auto", "it", "en"] {
+                            if ui
+                                .selectable_value(
+                                    &mut settings.language,
+                                    value.to_string(),
+                                    language_name(value),
+                                )
+                                .changed()
+                            {
+                                changed = true;
+                            }
+                        }
+                    })
+                    .response
+                    .labelled_by(language_label.id);
+            });
+            ui.add_space(8.0);
+
             ui.label(
-                RichText::new(
+                RichText::new(tr_str("Codec già accettati", "Already accepted codecs")).strong(),
+            );
+            ui.label(
+                RichText::new(tr_str(
                     "I file con questi codec risultano compatibili e non vanno convertiti.",
-                )
+                    "Files with these codecs count as compatible and are not converted.",
+                ))
                 .small()
                 .color(theme::MUTED),
             );
@@ -926,20 +1078,24 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
             }
             ui.add_space(8.0);
 
-            ui.label(RichText::new("Conversione").strong());
+            ui.label(RichText::new(tr_str("Conversione", "Conversion")).strong());
             if ui
                 .checkbox(
                     &mut settings.replace_original,
-                    "Sostituisci l’originale per impostazione predefinita",
+                    tr_str(
+                        "Sostituisci l’originale per impostazione predefinita",
+                        "Replace the original by default",
+                    ),
                 )
                 .changed()
             {
                 changed = true;
             }
             ui.label(
-                RichText::new(
+                RichText::new(tr_str(
                     "Resta valida la verifica completa con backup: vale solo per MKV e MP4.",
-                )
+                    "Full verification with backup still applies: MKV and MP4 only.",
+                ))
                 .small()
                 .color(theme::MUTED),
             );
@@ -949,13 +1105,13 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
                 .num_columns(2)
                 .spacing([18.0, 6.0])
                 .show(ui, |ui| {
-                    let profile_label = ui.label("Profilo");
+                    let profile_label = ui.label(tr_str("Profilo", "Profile"));
                     let profiles = builtin_profiles();
                     let selected = profiles
                         .iter()
                         .find(|profile| profile.key == settings.default_profile)
                         .map(|profile| profile.label.clone())
-                        .unwrap_or_else(|| "Bilanciato".to_string());
+                        .unwrap_or_else(|| tr_str("Bilanciato", "Balanced").to_string());
                     egui::ComboBox::from_id_salt("settings-profile")
                         .width(320.0)
                         .selected_text(selected)
@@ -977,7 +1133,7 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
                         .labelled_by(profile_label.id);
                     ui.end_row();
 
-                    let container_label_widget = ui.label("Contenitore");
+                    let container_label_widget = ui.label(tr_str("Contenitore", "Container"));
                     egui::ComboBox::from_id_salt("settings-container")
                         .width(320.0)
                         .selected_text(container_label(&settings.default_container))
@@ -1002,10 +1158,16 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
 
             ui.add_space(10.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add(theme::primary_button("Chiudi")).clicked() {
+                if ui
+                    .add(theme::primary_button(tr_str("Chiudi", "Close")))
+                    .clicked()
+                {
                     closed = true;
                 }
-                if ui.add(theme::secondary_button("Ripristina")).clicked() {
+                if ui
+                    .add(theme::secondary_button(tr_str("Ripristina", "Reset")))
+                    .clicked()
+                {
                     let directory = std::mem::take(&mut settings.directory);
                     let (width, height) = (settings.window_width, settings.window_height);
                     *settings = Settings::default();

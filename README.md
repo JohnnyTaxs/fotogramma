@@ -1,12 +1,11 @@
-<p align="center">
-  <img src="deployment/fotogramma.iconset/icon_256x256.png" alt="Fotogramma icon" width="128" height="128">
-</p>
-
-<h1 align="center">Fotogramma</h1>
+<h1>
+  <img src="deployment/fotogramma.iconset/icon_128x128.png" alt="Fotogramma icon" width="48" height="48" align="absmiddle">
+  Fotogramma
+</h1>
 
 Fotogramma is a **native desktop application** for inspecting a video library, identifying files that may benefit from H.265 conversion, and converting videos directly with FFmpeg.
 
-It is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no browser, WebView, HTTP server, or launcher. The interface is in Italian. The Python 1.x application has been removed; the repository contains only the Rust workspace.
+It is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no browser, WebView, HTTP server, or launcher. The interface is available in **English and Italian**: it follows the operating system language and can be overridden in Settings. The Python 1.x application has been removed; the repository contains only the Rust workspace.
 
 ![Fotogramma Desktop](docs/assets/fotogramma-native-results.png)
 
@@ -20,6 +19,7 @@ It is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no brows
 - Statistics, filters, search, sortable columns, and multi-file selection.
 - **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
 - Full-output validation before replacing an original file.
+- **English and Italian**, chosen automatically from the system language, with an optional manual override.
 - **Settings** window: choose which codecs count as already compatible (the home page, statistics, and table update at once, no new scan) and the conversion defaults (replace original, profile, container).
 - Original application icon and Cinema Pop theme.
 - No videos are modified during inspection. No media or metadata is uploaded during scanning or conversion.
@@ -42,8 +42,9 @@ The bundle contains the Rust binary, the original icon, and a purpose-built FFmp
 
 ![Settings window](docs/assets/fotogramma-settings.png)
 
-Open **Impostazioni** from the header. Changes apply immediately and are remembered:
+Open **Settings** (*Impostazioni* in Italian) from the header. Changes apply immediately and are remembered:
 
+- **Language:** automatic (follows the system), Italian, or English.
 - **Accepted codecs:** H.265, AV1, H.264, VP9. Files with an accepted codec count as already compatible. Unreadable files always stay errors, and a conversion is always verified as HEVC.
 - **Replace the original by default:** pre-selects the verified replacement in the conversion dialog.
 - **Profile and container:** the preset and `mkv`/`mp4` pre-selected for new conversions.
@@ -112,13 +113,13 @@ The application looks for the media tools in the executable folder, `bin/` besid
 
 ## Usage
 
-1. Choose a folder with **Sfoglia** (Browse) or enter its path.
-2. Click **Analizza libreria** (Analyze library).
+1. Choose a folder with **Browse** (*Sfoglia*) or enter its path.
+2. Click **Scan library** (*Analizza libreria*).
 3. Use statistics and filters to narrow down candidates.
 4. Select one or more videos to reveal available actions.
 5. Click a column header to sort and double-click a video for details.
 6. Convert directly or export the list for another tool.
-7. Adjust the accepted codecs and conversion defaults in **Impostazioni**.
+7. Adjust the language, the accepted codecs, and the conversion defaults in **Settings** (*Impostazioni*).
 
 The last directory, window size, and your settings are saved in `settings.toml` under the platform configuration folder. Scan results are never persisted.
 
@@ -129,7 +130,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-The suite covers discovery, probing, classification, presets, FFmpeg arguments, output allocation, duration/stream/full-decode validation, atomic replacement and backup restoration, settings, the virtualized table, codec re-classification, and four `egui_kittest` snapshots (main window and conversion dialog at 1280×820 and 1050×680).
+The suite covers discovery, probing, classification, presets, FFmpeg arguments, output allocation, duration/stream/full-decode validation, atomic replacement and backup restoration, settings, the virtualized table, codec re-classification, language selection and English output, and four `egui_kittest` snapshots (main window and conversion dialog at 1280×820 and 1050×680).
 
 Two optional end-to-end tests convert a generated clip and verify atomic replacement with real FFmpeg binaries. They use the system tools by default, or the packaged minimal tools when `FOTOGRAMMA_FFMPEG_DIR` is set:
 

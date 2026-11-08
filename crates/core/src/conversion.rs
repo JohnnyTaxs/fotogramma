@@ -1,5 +1,6 @@
 //! Safe H.265 conversion profiles, output allocation and command generation.
 
+use crate::i18n::tr_str;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,8 +62,11 @@ pub const PRESETS: [&str; 9] = [
 pub fn builtin_profiles() -> Vec<ConversionProfile> {
     let mut maximum = ConversionProfile::new(
         "max_quality",
-        "Massima qualità e compressione",
-        "Il miglior rapporto qualità/dimensione, senza fretta: CRF 20, preset veryslow e AQ mode 3.",
+        tr_str("Massima qualità e compressione", "Maximum quality and compression"),
+        tr_str(
+            "Il miglior rapporto qualità/dimensione, senza fretta: CRF 20, preset veryslow e AQ mode 3.",
+            "The best quality/size ratio, without hurry: CRF 20, veryslow preset and AQ mode 3.",
+        ),
         20,
         "veryslow",
         "yuv420p10le",
@@ -73,16 +77,22 @@ pub fn builtin_profiles() -> Vec<ConversionProfile> {
         maximum,
         ConversionProfile::new(
             "balanced",
-            "Intermedio · buona qualità",
-            "Buon equilibrio tra qualità, spazio e tempo: CRF 22 e preset medium.",
+            tr_str("Intermedio · buona qualità", "Intermediate · good quality"),
+            tr_str(
+                "Buon equilibrio tra qualità, spazio e tempo: CRF 22 e preset medium.",
+                "A good balance of quality, size and time: CRF 22 and medium preset.",
+            ),
             22,
             "medium",
             "yuv420p10le",
         ),
         ConversionProfile::new(
             "fast",
-            "Veloce · transcode rapido",
-            "Massima velocità disponibile: CRF 26, preset ultrafast e video 8-bit.",
+            tr_str("Veloce · transcode rapido", "Fast · quick transcode"),
+            tr_str(
+                "Massima velocità disponibile: CRF 26, preset ultrafast e video 8-bit.",
+                "Maximum available speed: CRF 26, ultrafast preset and 8-bit video.",
+            ),
             26,
             "ultrafast",
             "yuv420p",
@@ -106,8 +116,12 @@ pub fn custom_profile(
 ) -> ConversionProfile {
     ConversionProfile {
         key: "custom".to_string(),
-        label: "Personalizzato".to_string(),
-        description: "Impostazioni scelte manualmente.".to_string(),
+        label: tr_str("Personalizzato", "Custom").to_string(),
+        description: tr_str(
+            "Impostazioni scelte manualmente.",
+            "Settings chosen manually.",
+        )
+        .to_string(),
         crf,
         preset: preset.to_string(),
         pixel_format: pixel_format.to_string(),
@@ -186,7 +200,7 @@ pub fn allocate_output_path(
     container: &str,
 ) -> Result<PathBuf, String> {
     if container != "mkv" && container != "mp4" {
-        return Err("Contenitore non supportato".to_string());
+        return Err(tr_str("Contenitore non supportato", "Unsupported container").to_string());
     }
     let stem = source
         .file_stem()
@@ -209,7 +223,11 @@ pub fn allocate_partial_path(source: &Path) -> Result<PathBuf, String> {
         .map(|value| value.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     if extension != "mkv" && extension != "mp4" {
-        return Err("La sostituzione è disponibile solo per file MKV e MP4".to_string());
+        return Err(tr_str(
+            "La sostituzione è disponibile solo per file MKV e MP4",
+            "Replacement is only available for MKV and MP4 files",
+        )
+        .to_string());
     }
     let stem = source
         .file_stem()

@@ -93,15 +93,15 @@ pub struct VideoInfo {
 impl VideoInfo {
     pub fn status_label(&self) -> &'static str {
         match self.category {
-            Category::Convert => "Converti in H.265",
-            Category::Compatible => "Pronto",
-            Category::Error => "Verifica file",
+            Category::Convert => crate::i18n::tr_str("Converti in H.265", "Convert to H.265"),
+            Category::Compatible => crate::i18n::tr_str("Pronto", "Ready"),
+            Category::Error => crate::i18n::tr_str("Verifica file", "Check file"),
         }
     }
 
     pub fn folder_label(&self) -> &str {
         if self.folder.is_empty() {
-            "Cartella principale"
+            crate::i18n::tr_str("Cartella principale", "Main folder")
         } else {
             &self.folder
         }
@@ -360,7 +360,10 @@ pub fn probe_video(
             return Ok(error_video(
                 file_path,
                 root,
-                format!("ffprobe non ha risposto entro {PROBE_TIMEOUT_SECONDS} secondi."),
+                crate::tr!(
+                    "ffprobe non ha risposto entro {PROBE_TIMEOUT_SECONDS} secondi.",
+                    "ffprobe did not answer within {PROBE_TIMEOUT_SECONDS} seconds."
+                ),
                 size,
             ));
         }
@@ -379,7 +382,11 @@ pub fn probe_video(
     if !status.success() {
         let details = if stderr.trim().is_empty() {
             if stdout.trim().is_empty() {
-                "File non leggibile da ffprobe.".to_string()
+                crate::i18n::tr_str(
+                    "File non leggibile da ffprobe.",
+                    "File not readable by ffprobe.",
+                )
+                .to_string()
             } else {
                 stdout.trim().to_string()
             }
@@ -407,7 +414,8 @@ pub fn probe_video(
         return Ok(error_video(
             file_path,
             root,
-            "Nessun flusso video trovato.".to_string(),
+            crate::i18n::tr_str("Nessun flusso video trovato.", "No video stream found.")
+                .to_string(),
             size,
         ));
     }
@@ -421,7 +429,8 @@ pub fn probe_video(
         return Ok(error_video(
             file_path,
             root,
-            "Codec video non disponibile.".to_string(),
+            crate::i18n::tr_str("Codec video non disponibile.", "Video codec not available.")
+                .to_string(),
             size,
         ));
     };

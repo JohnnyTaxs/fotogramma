@@ -9,7 +9,8 @@ Operational guide for agents modifying **Fotogramma Desktop** (v2, Rust). The we
 - By default `hevc` and `av1` are `compatible`; every other valid codec is `convert`; read failures are `error`. The user can change the accepted codecs in the settings window: the probe keeps the defaults and the app re-applies the list with `reclassify`, so a change never needs a new scan. Verification after a conversion still requires `hevc`.
 - Only the first video stream (`v:0`) of `.mp4`, `.mkv`, and `.webm` is analyzed.
 - No CDN or online service is required at runtime.
-- `settings.toml` stores the directory, window size, accepted codecs, and conversion defaults (replace original, profile, container), never scan results.
+- **Two languages: Italian and English.** Every user-visible string goes through `tr_str` or `tr!` with both texts (never a bare literal), including messages built in `core` and on worker threads. The language is process-wide (`i18n::set_lang`); Italian is the default, `auto` follows the OS through `sys-locale`, and the Settings window can override it. Prefer "Label: {}" over "{} items" so no plural form is needed. Tests fix the system locale to `it-IT`; UI tests take the `lang_guard` lock, and English output is tested in `crates/core/tests/english.rs`.
+- `settings.toml` stores the directory, window size, language, accepted codecs, and conversion defaults (replace original, profile, container), never scan results.
 - Build **onedir** for each OS/architecture, never onefile and never cross-compiled.
 - The packaged app must stay within **45 MB** with a ZIP within **18 MB**.
 
@@ -46,6 +47,7 @@ Linux and Windows build x265 with `deployment/ffmpeg/build_x265.sh` (8-bit + 10-
 | `crates/core/src/scanner.rs` | Discovery, `Popen`-equivalent probing, classification, cancellation. Must remain UI-independent. |
 | `crates/core/src/media_tools.rs` | ffmpeg/ffprobe resolution in source and packaged builds; `DYLD_LIBRARY_PATH` only on macOS. |
 | `crates/core/src/conversion.rs` | Profiles and FFmpeg arguments. Use `-n`, `-map 0`, and non-overwriting output. |
+| `crates/core/src/i18n.rs` | `Lang`, the process-wide language, `tr_str` and `tr!`. No other module may hardcode user-visible text in one language. |
 | `crates/core/src/verification.rs` | Codec/duration/stream validation, full decode, and atomic backup replacement. |
 | `crates/app/src/app.rs` | Entry state, layout, selection, scan flow, smoke test, four snapshots. |
 | `crates/app/src/icon.rs` | Apply the bundled icon to the macOS Dock at startup. |

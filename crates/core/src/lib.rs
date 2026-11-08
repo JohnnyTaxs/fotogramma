@@ -8,6 +8,7 @@
 
 pub mod conversion;
 pub mod formatting;
+pub mod i18n;
 pub mod media_tools;
 pub mod scanner;
 pub mod verification;

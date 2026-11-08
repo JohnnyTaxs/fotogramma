@@ -1,11 +1,14 @@
-//! Italian display formatting shared by the interface.
+//! Display formatting shared by the interface: Italian uses `.` for thousands
+//! and `,` for decimals, English the opposite.
+
+use crate::i18n::{lang, tr_str, Lang};
 
 pub fn format_int(value: usize) -> String {
     let digits = value.to_string();
     let mut formatted = String::new();
     for (index, character) in digits.chars().enumerate() {
         if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            formatted.push('.');
+            formatted.push(if lang() == Lang::It { '.' } else { ',' });
         }
         formatted.push(character);
     }
@@ -26,7 +29,13 @@ pub fn format_bytes(value: Option<u64>) -> String {
     if index == 0 {
         format!("{} {}", amount as u64, units[index])
     } else {
-        format!("{:.1}", amount).replace('.', ",") + " " + units[index]
+        let number = format!("{amount:.1}");
+        let number = if lang() == Lang::It {
+            number.replace('.', ",")
+        } else {
+            number
+        };
+        format!("{number} {}", units[index])
     }
 }
 
@@ -47,7 +56,7 @@ pub fn format_duration(value: Option<f64>) -> String {
 
 pub fn codec_label(codec: Option<&str>) -> String {
     let Some(codec) = codec else {
-        return "Sconosciuto".to_string();
+        return tr_str("Sconosciuto", "Unknown").to_string();
     };
     match codec {
         "hevc" => "H.265".to_string(),

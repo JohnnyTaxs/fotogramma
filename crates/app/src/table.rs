@@ -3,18 +3,21 @@
 use eframe::egui::{self, Align, Align2, CornerRadius, FontId, Label, RichText, Sense, Stroke};
 use egui_extras::{Column, TableBuilder};
 use fotogramma_core::formatting::{codec_label, format_bytes, format_duration};
+use fotogramma_core::i18n::tr_str;
 use fotogramma_core::scanner::{Category, VideoInfo};
 
 use crate::theme;
 
-pub const HEADERS: [&str; 6] = [
-    "Video",
-    "Codec",
-    "Durata",
-    "Risoluzione",
-    "Dimensione",
-    "Azione",
-];
+pub fn headers() -> [&'static str; 6] {
+    [
+        "Video",
+        "Codec",
+        tr_str("Durata", "Duration"),
+        tr_str("Risoluzione", "Resolution"),
+        tr_str("Dimensione", "Size"),
+        tr_str("Azione", "Action"),
+    ]
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilterCategory {
@@ -156,7 +159,7 @@ pub fn show(
             .column(Column::exact(92.0))
             .column(Column::exact(156.0))
             .header(28.0, |mut header| {
-                for (index, title) in HEADERS.iter().enumerate() {
+                for (index, title) in headers().iter().enumerate() {
                     header.col(|ui| {
                         let arrow = if sort.column == index {
                             if sort.ascending {
@@ -172,7 +175,10 @@ pub fn show(
                             .color(theme::LAVENDER);
                         if ui
                             .add(egui::Button::new(text).frame(false))
-                            .on_hover_text("Ordina per questa colonna")
+                            .on_hover_text(tr_str(
+                                "Ordina per questa colonna",
+                                "Sort by this column",
+                            ))
                             .clicked()
                         {
                             sort.toggle(index);

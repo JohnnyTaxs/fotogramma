@@ -26,7 +26,7 @@ eframe + egui (glow / OpenGL)
 
 ## Workspace
 
-`Cargo.toml` defines a two-crate workspace, version `2.2.0`:
+`Cargo.toml` defines a two-crate workspace, version `2.3.0`:
 
 | Crate | Responsibility |
 | --- | --- |
@@ -67,6 +67,10 @@ On macOS, `tool_environment()` points `DYLD_LIBRARY_PATH` at the tool folder whe
 
 `allocate_output_path()` adds `.h265` and a numeric suffix when the destination exists. `allocate_partial_path()` creates a same-filesystem temporary file used only after full validation and preserves the original MKV/MP4 extension; WebM replacement is rejected.
 
+### `crates/core/src/i18n.rs`
+
+Italian and English. `Lang` resolves the setting (`auto`, `it`, `en`) against the system locale; the current language is a process-wide atomic because messages are produced on worker threads too. `tr_str(it, en)` picks a static string and `tr!(it, en, args…)` formats one. Number formats follow the language (`1.234,5` or `1,234.5`). `auto` maps `it*` locales to Italian and everything else to English.
+
 ### `crates/core/src/verification.rs`
 
 Verified replacement has two separate phases:
@@ -102,7 +106,7 @@ Cinema Pop colors and embedded **Sora** / **IBM Plex Mono** fonts (SIL Open Font
 
 ### `crates/app/src/settings.rs`
 
-Reads and writes `settings.toml` in `~/Library/Application Support/Fotogramma`, `%APPDATA%\Fotogramma`, or `$XDG_CONFIG_HOME/fotogramma`. The directory, window size, accepted codecs, and conversion defaults are stored; scan results are never persisted. Changing the accepted codecs re-classifies the loaded library with `scanner::reclassify` instead of scanning again. The config directory is disabled under `cfg!(test)` so snapshots never touch user files.
+Reads and writes `settings.toml` in `~/Library/Application Support/Fotogramma`, `%APPDATA%\Fotogramma`, or `$XDG_CONFIG_HOME/fotogramma`. The directory, window size, language, accepted codecs, and conversion defaults are stored; scan results are never persisted. Changing the accepted codecs re-classifies the loaded library with `scanner::reclassify` instead of scanning again. The config directory is disabled under `cfg!(test)` so snapshots never touch user files.
 
 ## UI states
 

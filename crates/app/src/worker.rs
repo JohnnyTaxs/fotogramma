@@ -5,6 +5,7 @@ use eframe::egui;
 use fotogramma_core::conversion::{
     allocate_output_path, allocate_partial_path, build_ffmpeg_args, ConversionProfile,
 };
+use fotogramma_core::i18n::tr_str;
 use fotogramma_core::media_tools::{ffmpeg_path, ffprobe_path, prepare_command};
 use fotogramma_core::scanner::{discover_videos, probe_videos, DiscoveryWarning, VideoInfo};
 use fotogramma_core::verification::{replace_verified_output, validate_conversion_output};
@@ -286,7 +287,10 @@ fn convert_one(
             return ConversionResult::failure(
                 &video.path,
                 destination,
-                format!("Impossibile avviare ffmpeg: {error}"),
+                fotogramma_core::tr!(
+                    "Impossibile avviare ffmpeg: {error}",
+                    "Cannot start ffmpeg: {error}"
+                ),
             );
         }
     };
@@ -369,7 +373,7 @@ fn convert_one(
             source: video.path.clone(),
             destination: destination.to_path_buf(),
             success: false,
-            message: "Conversione interrotta".to_string(),
+            message: tr_str("Conversione interrotta", "Conversion stopped").to_string(),
             cancelled: true,
             verified: false,
             replaced: false,
@@ -384,8 +388,9 @@ fn convert_one(
     };
     if !status.success() {
         let message = if log.is_empty() {
-            format!(
+            fotogramma_core::tr!(
                 "ffmpeg è terminato con codice {}",
+                "ffmpeg exited with code {}",
                 status.code().unwrap_or(-1)
             )
         } else {
@@ -400,7 +405,7 @@ fn convert_one(
             return ConversionResult::failure(
                 &video.path,
                 destination,
-                "File di output non creato".to_string(),
+                tr_str("File di output non creato", "Output file not created").to_string(),
             );
         }
     }
@@ -424,7 +429,10 @@ fn convert_one(
             return ConversionResult::failure(
                 &video.path,
                 destination,
-                format!("Originale non modificato: {validation_message}"),
+                fotogramma_core::tr!(
+                    "Originale non modificato: {validation_message}",
+                    "Original left unchanged: {validation_message}"
+                ),
             );
         }
         let (replaced, replacement_message) =

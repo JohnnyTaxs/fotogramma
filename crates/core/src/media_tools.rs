@@ -55,8 +55,9 @@ pub fn find_tool(name: &str) -> Result<PathBuf, String> {
             }
         }
     }
-    Err(format!(
-        "{name} non trovato. Installa FFmpeg oppure usa la build portabile che lo include."
+    Err(crate::tr!(
+        "{name} non trovato. Installa FFmpeg oppure usa la build portabile che lo include.",
+        "{name} not found. Install FFmpeg or use the portable build that includes it."
     ))
 }
 
