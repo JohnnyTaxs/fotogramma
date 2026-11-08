@@ -16,6 +16,7 @@ Version 2 is written in **Rust** with `egui`/`eframe` and renders with OpenGL: n
 - Statistics, filters, search, sortable columns, and multi-file selection.
 - **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
 - Full-output validation before replacing an original file.
+- **Settings** window: choose which codecs count as already compatible (home and table update at once) and the conversion defaults (replace original, profile, container).
 - Original application icon and Cinema Pop theme.
 - No videos are modified during inspection. No media or metadata is uploaded during scanning or conversion.
 
@@ -104,7 +105,7 @@ The application looks for the media tools in the executable folder, `bin/` besid
 5. Click a column header to sort and double-click a video for details.
 6. Convert directly or export the list for another tool.
 
-The last directory and window size are saved in `settings.toml` under the platform configuration folder. Scan results are never persisted.
+The last directory, window size, and your settings are saved in `settings.toml` under the platform configuration folder. Scan results are never persisted.
 
 ## Tests
 
@@ -154,10 +155,10 @@ crates/app/                egui/eframe application
   src/app.rs               Window, layout, scan flow, snapshots
   src/icon.rs              Application and Dock icon at startup
   src/table.rs             Virtualized table, filters, sorting, selection
-  src/dialogs.rs           Conversion settings, progress, details, confirmations
+  src/dialogs.rs           Preferences, conversion settings, progress, details, confirmations
   src/worker.rs            Scan and conversion threads with channels
   src/theme.rs             Cinema Pop colors, fonts, visuals
-  src/settings.rs          TOML settings (directory and window size only)
+  src/settings.rs          TOML settings (directory, window size, defaults)
   src/platform.rs          Open folder in the system file manager
 deployment/
   ffmpeg/                  Minimal FFmpeg build and vendor collectors

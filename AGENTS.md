@@ -6,10 +6,10 @@ Operational guide for agents modifying **Fotogramma Desktop** (v2, Rust). The we
 
 - **Native desktop only** through `egui`/`eframe` with the `glow` (OpenGL) renderer. No HTTP server, Electron, Tauri, Qt, WebView, or external browser. The app makes no network request at runtime.
 - **Default mode never overwrites originals.** Replacement is allowed only after HEVC, duration, stream, full-decode, and final-codec validation, with an atomic backup restored on failure.
-- `hevc` and `av1` are `compatible`; every other valid codec is `convert`; read failures are `error`.
+- By default `hevc` and `av1` are `compatible`; every other valid codec is `convert`; read failures are `error`. The user can change the accepted codecs in the settings window: the probe keeps the defaults and the app re-applies the list with `reclassify`, so a change never needs a new scan. Verification after a conversion still requires `hevc`.
 - Only the first video stream (`v:0`) of `.mp4`, `.mkv`, and `.webm` is analyzed.
 - No CDN or online service is required at runtime.
-- `settings.toml` stores only the directory and window size, not scan results.
+- `settings.toml` stores the directory, window size, accepted codecs, and conversion defaults (replace original, profile, container), never scan results.
 - Build **onedir** for each OS/architecture, never onefile and never cross-compiled.
 - The packaged app must stay within **45 MB** with a ZIP within **18 MB**.
 
@@ -49,10 +49,10 @@ Linux and Windows build x265 with `deployment/ffmpeg/build_x265.sh` (8-bit + 10-
 | `crates/app/src/app.rs` | Entry state, layout, selection, scan flow, smoke test, four snapshots. |
 | `crates/app/src/icon.rs` | Apply the bundled icon to the macOS Dock at startup. |
 | `crates/app/src/table.rs` | Virtualized table, filters, sorting, selection, exact column widths. |
-| `crates/app/src/dialogs.rs` | Conversion settings, command preview, progress, results, close confirmation. |
+| `crates/app/src/dialogs.rs` | Preferences window, conversion settings, command preview, progress, results, close confirmation. |
 | `crates/app/src/worker.rs` | Scan and conversion threads; communicate only through channels. |
 | `crates/app/src/theme.rs` | Cinema Pop colors and embedded Sora/IBM Plex Mono. Do not introduce HTML/CSS or a second theme. |
-| `crates/app/src/settings.rs` | TOML preferences; config directory disabled under `cfg!(test)`. |
+| `crates/app/src/settings.rs` | TOML preferences and defaults (accepted codecs, conversion defaults); config directory disabled under `cfg!(test)`. |
 | `crates/app/src/platform.rs` | Open a folder in the system file manager. |
 
 Data flow: directory → `discover_videos` → `probe_videos` → `mpsc` → app state → `TableBuilder`.

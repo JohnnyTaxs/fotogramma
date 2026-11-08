@@ -9,7 +9,7 @@ fotogramma (Rust binary)
 eframe + egui (glow / OpenGL)
         |
         +--> rfd file dialogs
-        +--> TOML settings (directory and window size)
+        +--> TOML settings (directory, window size, defaults)
         |
         +--> scan thread --------------------------------+
         |       discover_videos                          |
@@ -102,7 +102,7 @@ Cinema Pop colors and embedded **Sora** / **IBM Plex Mono** fonts (SIL Open Font
 
 ### `crates/app/src/settings.rs`
 
-Reads and writes `settings.toml` in `~/Library/Application Support/Fotogramma`, `%APPDATA%\Fotogramma`, or `$XDG_CONFIG_HOME/fotogramma`. Only the directory and window size are stored; scan results are never persisted. The config directory is disabled under `cfg!(test)` so snapshots never touch user files.
+Reads and writes `settings.toml` in `~/Library/Application Support/Fotogramma`, `%APPDATA%\Fotogramma`, or `$XDG_CONFIG_HOME/fotogramma`. The directory, window size, accepted codecs, and conversion defaults are stored; scan results are never persisted. Changing the accepted codecs re-classifies the loaded library with `scanner::reclassify` instead of scanning again. The config directory is disabled under `cfg!(test)` so snapshots never touch user files.
 
 ## UI states
 

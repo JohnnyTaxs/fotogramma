@@ -12,6 +12,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
+use crate::settings::{Settings, KNOWN_CODECS};
 use crate::theme;
 use crate::worker::{ConversionMessage, ConversionResult};
 
@@ -51,14 +52,14 @@ pub enum DialogOutcome {
 }
 
 impl ConversionDialog {
-    pub fn new(videos: Vec<VideoInfo>) -> Self {
+    pub fn new(videos: Vec<VideoInfo>, defaults: &Settings) -> Self {
         let destination = videos
             .first()
             .and_then(|video| video.path.parent())
             .map(|parent| parent.join("Fotogramma-H265"))
             .unwrap_or_else(|| PathBuf::from("Fotogramma-H265"));
         let balanced = builtin_profile("balanced").expect("balanced profile");
-        Self {
+        let mut dialog = Self {
             videos,
             profile_key: "balanced".to_string(),
             crf: balanced.crf,
@@ -67,10 +68,22 @@ impl ConversionDialog {
             tune: String::new(),
             aq: balanced.aq_mode,
             audio_index: 0,
-            container: "mkv".to_string(),
+            container: if defaults.default_container == "mp4" {
+                "mp4".to_string()
+            } else {
+                "mkv".to_string()
+            },
             destination: destination.to_string_lossy().into_owned(),
-            replace_original: false,
+            replace_original: defaults.replace_original,
+        };
+        // A saved profile that no longer exists falls back to "balanced".
+        if defaults.default_profile != "custom"
+            && builtin_profile(&defaults.default_profile).is_some()
+        {
+            dialog.profile_key = defaults.default_profile.clone();
+            dialog.apply_profile();
         }
+        dialog
     }
 
     fn apply_profile(&mut self) {
@@ -884,4 +897,144 @@ impl ConversionSession {
     pub fn destination_dir(&self) -> &Path {
         &self.destination_dir
     }
+}
+
+/// Preferences window. Edits `settings` in place; the return value tells the
+/// caller whether something changed (to save and re-classify) and whether the
+/// window was closed.
+pub struct SettingsOutcome {
+    pub changed: bool,
+    pub closed: bool,
+}
+
+pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOutcome {
+    let mut changed = false;
+    let mut closed = false;
+    let modal = egui::Modal::new(egui::Id::unique("settings-dialog"))
+        .frame(modal_frame())
+        .show(ctx, |ui| {
+            ui.set_min_width(520.0);
+            ui.set_max_width(560.0);
+            ui.label(RichText::new("Impostazioni").size(21.0).strong());
+            ui.label(
+                RichText::new("Valori predefiniti. Si applicano subito e vengono ricordati.")
+                    .small()
+                    .color(theme::MUTED),
+            );
+            ui.add_space(8.0);
+
+            ui.label(RichText::new("Codec già accettati").strong());
+            ui.label(
+                RichText::new(
+                    "I file con questi codec risultano compatibili e non vanno convertiti.",
+                )
+                .small()
+                .color(theme::MUTED),
+            );
+            for (key, label) in KNOWN_CODECS {
+                let mut accepted = settings.accepted_codecs.iter().any(|value| value == key);
+                if ui.checkbox(&mut accepted, label).changed() {
+                    settings.accepted_codecs.retain(|value| value != key);
+                    if accepted {
+                        settings.accepted_codecs.push(key.to_string());
+                    }
+                    changed = true;
+                }
+            }
+            ui.add_space(8.0);
+
+            ui.label(RichText::new("Conversione").strong());
+            if ui
+                .checkbox(
+                    &mut settings.replace_original,
+                    "Sostituisci l’originale per impostazione predefinita",
+                )
+                .changed()
+            {
+                changed = true;
+            }
+            ui.label(
+                RichText::new(
+                    "Resta valida la verifica completa con backup: vale solo per MKV e MP4.",
+                )
+                .small()
+                .color(theme::MUTED),
+            );
+            ui.add_space(4.0);
+
+            egui::Grid::new("settings-form")
+                .num_columns(2)
+                .spacing([18.0, 6.0])
+                .show(ui, |ui| {
+                    let profile_label = ui.label("Profilo");
+                    let profiles = builtin_profiles();
+                    let selected = profiles
+                        .iter()
+                        .find(|profile| profile.key == settings.default_profile)
+                        .map(|profile| profile.label.clone())
+                        .unwrap_or_else(|| "Bilanciato".to_string());
+                    egui::ComboBox::from_id_salt("settings-profile")
+                        .width(320.0)
+                        .selected_text(selected)
+                        .show_ui(ui, |ui| {
+                            for profile in &profiles {
+                                if ui
+                                    .selectable_value(
+                                        &mut settings.default_profile,
+                                        profile.key.clone(),
+                                        profile.label.clone(),
+                                    )
+                                    .changed()
+                                {
+                                    changed = true;
+                                }
+                            }
+                        })
+                        .response
+                        .labelled_by(profile_label.id);
+                    ui.end_row();
+
+                    let container_label_widget = ui.label("Contenitore");
+                    egui::ComboBox::from_id_salt("settings-container")
+                        .width(320.0)
+                        .selected_text(container_label(&settings.default_container))
+                        .show_ui(ui, |ui| {
+                            for value in ["mkv", "mp4"] {
+                                if ui
+                                    .selectable_value(
+                                        &mut settings.default_container,
+                                        value.to_string(),
+                                        container_label(value),
+                                    )
+                                    .changed()
+                                {
+                                    changed = true;
+                                }
+                            }
+                        })
+                        .response
+                        .labelled_by(container_label_widget.id);
+                    ui.end_row();
+                });
+
+            ui.add_space(10.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add(theme::primary_button("Chiudi")).clicked() {
+                    closed = true;
+                }
+                if ui.add(theme::secondary_button("Ripristina")).clicked() {
+                    let directory = std::mem::take(&mut settings.directory);
+                    let (width, height) = (settings.window_width, settings.window_height);
+                    *settings = Settings::default();
+                    settings.directory = directory;
+                    settings.window_width = width;
+                    settings.window_height = height;
+                    changed = true;
+                }
+            });
+        });
+    if modal.should_close() {
+        closed = true;
+    }
+    SettingsOutcome { changed, closed }
 }

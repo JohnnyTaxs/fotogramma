@@ -1,10 +1,19 @@
-//! Small persisted preferences: directory and window size only.
-//! Scan results are never stored.
+//! Small persisted preferences: directory, window size and the user's
+//! defaults (accepted codecs, conversion defaults). Scan results are never
+//! stored.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// Codecs the user can mark as already acceptable: ffprobe name and label.
+pub const KNOWN_CODECS: [(&str, &str); 4] = [
+    ("hevc", "H.265 · HEVC"),
+    ("av1", "AV1 · AOMedia"),
+    ("h264", "H.264 · AVC"),
+    ("vp9", "VP9 · WebM"),
+];
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
     pub directory: String,
@@ -12,6 +21,44 @@ pub struct Settings {
     pub window_width: Option<f32>,
     #[serde(default)]
     pub window_height: Option<f32>,
+    /// Codecs treated as already compatible.
+    #[serde(default = "default_accepted_codecs")]
+    pub accepted_codecs: Vec<String>,
+    /// Pre-select "replace the original" in the conversion dialog.
+    #[serde(default)]
+    pub replace_original: bool,
+    /// Conversion profile key pre-selected in the conversion dialog.
+    #[serde(default = "default_profile")]
+    pub default_profile: String,
+    /// Output container for new files: `mkv` or `mp4`.
+    #[serde(default = "default_container")]
+    pub default_container: String,
+}
+
+fn default_accepted_codecs() -> Vec<String> {
+    vec!["hevc".to_string(), "av1".to_string()]
+}
+
+fn default_profile() -> String {
+    "balanced".to_string()
+}
+
+fn default_container() -> String {
+    "mkv".to_string()
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            directory: String::new(),
+            window_width: None,
+            window_height: None,
+            accepted_codecs: default_accepted_codecs(),
+            replace_original: false,
+            default_profile: default_profile(),
+            default_container: default_container(),
+        }
+    }
 }
 
 impl Settings {
@@ -74,11 +121,18 @@ mod tests {
             directory: "/Filmati".to_string(),
             window_width: Some(1280.0),
             window_height: Some(820.0),
+            accepted_codecs: vec!["h264".to_string()],
+            replace_original: true,
+            default_profile: "fast".to_string(),
+            default_container: "mp4".to_string(),
         };
         let text = toml::to_string_pretty(&settings).unwrap();
         let parsed: Settings = toml::from_str(&text).unwrap();
         assert_eq!(parsed.directory, "/Filmati");
         assert_eq!(parsed.window_width, Some(1280.0));
+        assert_eq!(parsed.accepted_codecs, vec!["h264".to_string()]);
+        assert!(parsed.replace_original);
+        assert_eq!(parsed.default_container, "mp4");
     }
 
     #[test]
@@ -86,5 +140,9 @@ mod tests {
         let parsed: Settings = toml::from_str("directory = \"/tmp\"\n").unwrap();
         assert_eq!(parsed.directory, "/tmp");
         assert_eq!(parsed.window_width, None);
+        assert_eq!(parsed.accepted_codecs, vec!["hevc", "av1"]);
+        assert!(!parsed.replace_original);
+        assert_eq!(parsed.default_profile, "balanced");
+        assert_eq!(parsed.default_container, "mkv");
     }
 }

@@ -19,6 +19,7 @@ eframe = { version = "0.37", default-features = false, features = [
     "wayland",
 ] }
 egui_extras = "0.37"
+image = { version = "0.25", default-features = false, features = ["png"] }
 fotogramma-core = { path = "../core" }
 rfd = "0.18"
 serde = { version = "1", features = ["derive"] }

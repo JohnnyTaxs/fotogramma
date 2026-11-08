@@ -13,6 +13,33 @@ pub const VIDEO_EXTENSIONS: [&str; 3] = ["mp4", "mkv", "webm"];
 pub const COMPATIBLE_CODECS: [&str; 2] = ["hevc", "av1"];
 pub const PROBE_TIMEOUT_SECONDS: u64 = 45;
 
+/// Classify a codec against the codecs the user accepts. The probe itself
+/// always uses [`COMPATIBLE_CODECS`]; the application re-applies the user's
+/// list afterwards so changing it never requires a new scan.
+pub fn classify_codec(codec: &str, accepted: &[String]) -> Category {
+    if accepted
+        .iter()
+        .any(|value| value.eq_ignore_ascii_case(codec))
+    {
+        Category::Compatible
+    } else {
+        Category::Convert
+    }
+}
+
+/// Re-classify readable videos with the accepted codec list. Unreadable files
+/// stay errors.
+pub fn reclassify(videos: &mut [VideoInfo], accepted: &[String]) {
+    for video in videos {
+        if video.category == Category::Error {
+            continue;
+        }
+        if let Some(codec) = &video.codec {
+            video.category = classify_codec(codec, accepted);
+        }
+    }
+}
+
 /// Classification follows the original application: a readable video is
 /// compatible only when its first stream is HEVC or AV1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -562,6 +589,36 @@ pub fn process_command(program: &Path) -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reclassify_follows_the_accepted_codecs() {
+        let video = |codec: &str, category| VideoInfo {
+            path: PathBuf::from(format!("/v/{codec}.mkv")),
+            relative_path: format!("{codec}.mkv"),
+            name: format!("{codec}.mkv"),
+            folder: String::new(),
+            extension: "mkv".to_string(),
+            category,
+            codec: Some(codec.to_string()),
+            size: Some(1),
+            duration: None,
+            width: None,
+            height: None,
+            error: None,
+        };
+        let mut videos = vec![
+            video("hevc", Category::Compatible),
+            video("h264", Category::Convert),
+            video("broken", Category::Error),
+        ];
+        let accepted = vec!["h264".to_string(), "av1".to_string()];
+        reclassify(&mut videos, &accepted);
+        assert_eq!(videos[0].category, Category::Convert);
+        assert_eq!(videos[1].category, Category::Compatible);
+        assert_eq!(videos[2].category, Category::Error);
+        reclassify(&mut videos, &[]);
+        assert_eq!(videos[1].category, Category::Convert);
+    }
 
     #[test]
     fn classifies_compatible_codecs() {

@@ -1,12 +1,14 @@
 //! Main window state and layout, rebuilt from the Qt application.
 
 use eframe::egui::{
-    self, Align, Align2, CornerRadius, FontId, Key, Layout, RichText, Sense, Stroke, StrokeKind,
-    Vec2,
+    self, Align, Align2, Color32, CornerRadius, FontId, Key, Layout, RichText, Sense, Stroke,
+    StrokeKind, Vec2,
 };
 use fotogramma_core::formatting::{format_bytes, format_int};
 use fotogramma_core::media_tools::{ffprobe_path, ffprobe_version};
-use fotogramma_core::scanner::{summarize, DiscoveryWarning, Summary, VideoInfo};
+use fotogramma_core::scanner::{
+    classify_codec, reclassify, summarize, DiscoveryWarning, Summary, VideoInfo,
+};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,7 +21,7 @@ use crate::dialogs::{
     ProgressAction,
 };
 use crate::platform;
-use crate::settings::Settings;
+use crate::settings::{Settings, KNOWN_CODECS};
 use crate::table::{self, FilterCategory, SortState, TableAction};
 use crate::theme;
 use crate::worker::{self, ScanMessage};
@@ -87,6 +89,8 @@ pub struct FotogrammaApp {
     close_after_scan_at: Option<Instant>,
     started_at: Instant,
     last_size: Vec2,
+    show_settings: bool,
+    logo: Option<egui::TextureHandle>,
 }
 
 impl FotogrammaApp {
@@ -138,6 +142,8 @@ impl FotogrammaApp {
             close_after_scan_at: None,
             started_at: Instant::now(),
             last_size: Vec2::new(1280.0, 820.0),
+            show_settings: false,
+            logo: load_logo(&cc.egui_ctx),
         };
         if app.args.scan_on_start {
             app.start_scan(&cc.egui_ctx);
@@ -180,6 +186,7 @@ impl FotogrammaApp {
                     self.scan_cancel = None;
                     self.scan_progress = None;
                     self.videos = videos;
+                    reclassify(&mut self.videos, &self.settings.accepted_codecs);
                     self.warnings = warnings;
                     self.cancelled = cancelled;
                     self.summary = summarize(&self.videos, None);
@@ -314,6 +321,16 @@ impl FotogrammaApp {
             self.session = None;
         }
 
+        if self.show_settings {
+            let outcome = dialogs::show_settings(ctx, &mut self.settings);
+            if outcome.changed {
+                self.apply_settings();
+            }
+            if outcome.closed {
+                self.show_settings = false;
+            }
+        }
+
         if let Some(video) = self.details.clone() {
             if dialogs::show_details(ctx, &video) {
                 self.details = None;
@@ -343,6 +360,21 @@ impl FotogrammaApp {
         }
     }
 
+    /// Persist the preferences and re-classify the loaded library, so a new
+    /// accepted-codec list shows up in the table and the home page at once.
+    fn apply_settings(&mut self) {
+        self.settings.save();
+        reclassify(&mut self.videos, &self.settings.accepted_codecs);
+        self.summary = summarize(&self.videos, None);
+        let convertible: HashSet<PathBuf> = self
+            .videos
+            .iter()
+            .filter(|video| video.category == fotogramma_core::scanner::Category::Convert)
+            .map(|video| video.path.clone())
+            .collect();
+        self.selected.retain(|path| convertible.contains(path));
+    }
+
     fn start_conversion(&mut self, plan: ConversionPlan, ctx: &egui::Context) {
         let cancel = Arc::new(AtomicBool::new(false));
         let receiver = worker::spawn_conversion(
@@ -366,9 +398,10 @@ impl FotogrammaApp {
                 .filter(|result| result.replaced)
                 .map(|result| result.source.clone())
                 .collect();
+            let accepted = self.settings.accepted_codecs.clone();
             for video in &mut self.videos {
                 if replaced.contains(&video.path) {
-                    video.category = fotogramma_core::scanner::Category::Compatible;
+                    video.category = classify_codec("hevc", &accepted);
                     video.codec = Some("hevc".to_string());
                     video.error = None;
                 }
@@ -389,8 +422,13 @@ impl FotogrammaApp {
         let _ = ctx;
     }
 
-    fn header(&self, ui: &mut egui::Ui) {
+    fn header(&mut self, ui: &mut egui::Ui) {
+        let mut open_settings = false;
         ui.horizontal(|ui| {
+            if let Some(logo) = &self.logo {
+                ui.add(egui::Image::new(logo).fit_to_exact_size(Vec2::splat(46.0)));
+                ui.add_space(4.0);
+            }
             ui.vertical(|ui| {
                 ui.label(RichText::new("Fotogramma").size(theme::BRAND_SIZE).strong());
                 ui.label(
@@ -400,6 +438,10 @@ impl FotogrammaApp {
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.add(theme::secondary_button("Impostazioni")).clicked() {
+                    open_settings = true;
+                }
+                ui.add_space(8.0);
                 let color = if self.engine_ok {
                     theme::MINT
                 } else {
@@ -418,10 +460,14 @@ impl FotogrammaApp {
                 );
             });
         });
+        if open_settings {
+            self.show_settings = true;
+        }
     }
 
     fn control_deck(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         theme::card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.label(RichText::new("Cartella della libreria").strong());
             ui.label(
                 RichText::new("Analisi ricorsiva di MP4, MKV e WebM. Nessuna modifica ai file.")
@@ -429,41 +475,42 @@ impl FotogrammaApp {
                     .color(theme::MUTED),
             );
             ui.add_space(2.0);
+            let mut browse = false;
+            let mut analyze = false;
+            let mut submit = false;
             ui.horizontal(|ui| {
-                let button_width = 118.0 + 150.0 + 20.0;
-                let width = (ui.available_width() - button_width).max(200.0);
-                let edit = ui.add_sized(
-                    [width, 34.0],
-                    egui::TextEdit::singleline(&mut self.directory)
-                        .font(theme::mono(11.0))
-                        .hint_text("Es. /Filmati oppure D:\\Video"),
-                );
-                if edit.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter)) {
-                    self.start_scan(ctx);
-                }
-                if ui
-                    .add_enabled(!self.scanning, theme::secondary_button("Sfoglia"))
-                    .clicked()
-                {
-                    if let Some(selected) = rfd::FileDialog::new()
-                        .set_directory(if self.directory.trim().is_empty() {
-                            home_directory()
-                        } else {
-                            PathBuf::from(self.directory.trim())
-                        })
-                        .pick_folder()
-                    {
-                        self.directory = selected.to_string_lossy().into_owned();
-                        self.folder_error = None;
-                    }
-                }
-                if ui
-                    .add_enabled(!self.scanning, theme::primary_button("Analizza libreria"))
-                    .clicked()
-                {
-                    self.start_scan(ctx);
-                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    analyze = ui
+                        .add_enabled(!self.scanning, theme::primary_button("Analizza libreria"))
+                        .clicked();
+                    browse = ui
+                        .add_enabled(!self.scanning, theme::secondary_button("Sfoglia"))
+                        .clicked();
+                    let edit = ui.add_sized(
+                        [ui.available_width(), 34.0],
+                        egui::TextEdit::singleline(&mut self.directory)
+                            .font(theme::mono(11.0))
+                            .hint_text("Es. /Filmati oppure D:\\Video"),
+                    );
+                    submit = edit.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+                });
             });
+            if submit || analyze {
+                self.start_scan(ctx);
+            }
+            if browse {
+                if let Some(selected) = rfd::FileDialog::new()
+                    .set_directory(if self.directory.trim().is_empty() {
+                        home_directory()
+                    } else {
+                        PathBuf::from(self.directory.trim())
+                    })
+                    .pick_folder()
+                {
+                    self.directory = selected.to_string_lossy().into_owned();
+                    self.folder_error = None;
+                }
+            }
 
             if self.scanning {
                 ui.add_space(4.0);
@@ -492,19 +539,31 @@ impl FotogrammaApp {
                                             format_int(processed),
                                             format_int(total)
                                         );
-                                        let width = counter_width(ui, &counter);
-                                        let bar_width = (ui.available_width() - width).max(60.0);
+                                        // The counter box has a fixed width, so the bar
+                                        // never moves when the file names change.
+                                        let counter_box =
+                                            (ui.available_width() * 0.4).clamp(180.0, 420.0);
+                                        let bar_width =
+                                            (ui.available_width() - counter_box - 8.0).max(60.0);
                                         ui.add(
                                             egui::ProgressBar::new(fraction)
                                                 .desired_height(8.0)
                                                 .desired_width(bar_width)
                                                 .fill(theme::CORAL),
                                         );
-                                        ui.add(
-                                            egui::Label::new(
-                                                RichText::new(counter).small().color(theme::MUTED),
-                                            )
-                                            .truncate(),
+                                        ui.allocate_ui_with_layout(
+                                            Vec2::new(counter_box, 14.0),
+                                            Layout::left_to_right(Align::Center),
+                                            |ui| {
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        RichText::new(counter)
+                                                            .small()
+                                                            .color(theme::MUTED),
+                                                    )
+                                                    .truncate(),
+                                                );
+                                            },
                                         );
                                     }
                                     None => {
@@ -584,13 +643,9 @@ impl FotogrammaApp {
                 ui.vertical(|ui| {
                     ui.set_width(ui.available_width());
                     ui.add_space(24.0);
-                    for (text, compatible) in [
-                        ("H.265 · HEVC", true),
-                        ("AV1 · AOMedia", true),
-                        ("H.264 · AVC", false),
-                        ("VP9 · WebM", false),
-                    ] {
-                        chip(ui, text, compatible);
+                    for (key, text) in KNOWN_CODECS {
+                        let accepted = self.settings.accepted_codecs.iter().any(|value| value == key);
+                        chip(ui, text, accepted);
                         ui.add_space(8.0);
                     }
                 });
@@ -637,7 +692,7 @@ impl FotogrammaApp {
                         "{} analizzati",
                         format_bytes(Some(self.summary.total_bytes))
                     ),
-                    false,
+                    theme::LAVENDER,
                     width,
                 ),
                 (
@@ -648,15 +703,15 @@ impl FotogrammaApp {
                         "{} da elaborare",
                         format_bytes(Some(self.summary.to_convert_bytes))
                     ),
-                    true,
+                    theme::CORAL,
                     width * 2.0,
                 ),
                 (
                     "compatible",
                     self.summary.compatible,
                     "Già compatibili",
-                    "H.265 oppure AV1".to_string(),
-                    false,
+                    accepted_summary(&self.settings.accepted_codecs),
+                    theme::MINT,
                     width,
                 ),
                 (
@@ -664,11 +719,11 @@ impl FotogrammaApp {
                     self.summary.errors,
                     "Non leggibili",
                     "Da controllare".to_string(),
-                    false,
+                    theme::ERROR,
                     width,
                 ),
             ];
-            for (key, value, label, detail, accent, card_width) in cards {
+            for (key, value, label, detail, tone, card_width) in cards {
                 let filter = match key {
                     "convert" => FilterCategory::Convert,
                     "compatible" => FilterCategory::Compatible,
@@ -676,10 +731,7 @@ impl FotogrammaApp {
                     _ => FilterCategory::All,
                 };
                 let selected = self.filter == filter;
-                if stat_card(
-                    ui, card_width, 66.0, value, label, &detail, accent, selected,
-                )
-                .clicked()
+                if stat_card(ui, card_width, 66.0, value, label, &detail, tone, selected).clicked()
                 {
                     self.filter = filter;
                 }
@@ -755,19 +807,21 @@ impl FotogrammaApp {
                 format_int(self.summary.to_convert)
             )
         } else {
-            "Tutti i file sono già compatibili con H.265 o AV1: non serve alcuna conversione."
-                .to_string()
+            format!(
+                "Tutti i file sono già compatibili ({}): non serve alcuna conversione.",
+                accepted_summary(&self.settings.accepted_codecs)
+            )
         };
         ui.label(RichText::new(insight).small().color(theme::MUTED));
 
         ui.horizontal(|ui| {
-            for (filter, label) in [
-                (FilterCategory::All, "Tutti"),
-                (FilterCategory::Convert, "Da convertire"),
-                (FilterCategory::Compatible, "Compatibili"),
-                (FilterCategory::Error, "Errori"),
+            for (filter, label, tone) in [
+                (FilterCategory::All, "Tutti", theme::LAVENDER),
+                (FilterCategory::Convert, "Da convertire", theme::CORAL),
+                (FilterCategory::Compatible, "Compatibili", theme::MINT),
+                (FilterCategory::Error, "Errori", theme::ERROR),
             ] {
-                if filter_pill(ui, label, self.filter == filter).clicked() {
+                if filter_pill(ui, label, tone, self.filter == filter).clicked() {
                     self.filter = filter;
                 }
             }
@@ -799,7 +853,8 @@ impl FotogrammaApp {
                     .on_hover_text("Crea nuovi file H.265 senza modificare gli originali")
                     .clicked()
                 {
-                    self.conversion_dialog = Some(ConversionDialog::new(selected.clone()));
+                    self.conversion_dialog =
+                        Some(ConversionDialog::new(selected.clone(), &self.settings));
                 }
             });
         });
@@ -1010,16 +1065,6 @@ fn home_directory() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Width of the scan counter, so the progress bar can reserve room for it.
-fn counter_width(ui: &egui::Ui, text: &str) -> f32 {
-    let font = egui::TextStyle::Small.resolve(ui.style());
-    ui.painter()
-        .layout_no_wrap(text.to_string(), font, theme::MUTED)
-        .size()
-        .x
-        + 10.0
-}
-
 fn chip(ui: &mut egui::Ui, text: &str, compatible: bool) {
     let (rect, _response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 66.0), Sense::hover());
@@ -1044,7 +1089,7 @@ fn chip(ui: &mut egui::Ui, text: &str, compatible: bool) {
     );
 }
 
-fn filter_pill(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
+fn filter_pill(ui: &mut egui::Ui, label: &str, tone: Color32, selected: bool) -> egui::Response {
     let text_color = if selected {
         theme::CORAL_INK
     } else {
@@ -1052,12 +1097,11 @@ fn filter_pill(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response
     };
     ui.add(
         egui::Button::new(RichText::new(label).color(text_color))
-            .fill(if selected {
-                theme::CORAL
-            } else {
-                theme::RAISED
-            })
-            .stroke(Stroke::new(1.0, theme::INPUT_BORDER))
+            .fill(if selected { tone } else { theme::RAISED })
+            .stroke(Stroke::new(
+                1.0,
+                if selected { tone } else { theme::INPUT_BORDER },
+            ))
             .corner_radius(CornerRadius::same(16)),
     )
 }
@@ -1070,32 +1114,27 @@ fn stat_card(
     value: usize,
     label: &str,
     detail: &str,
-    accent: bool,
+    tone: Color32,
     selected: bool,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
-    let fill = if accent { theme::CORAL } else { theme::SURFACE };
+    // The selected card is filled with its own tone; the others keep a thin
+    // outline in that tone so each card stays recognizable.
+    let fill = if selected { tone } else { theme::SURFACE };
     let stroke = if selected {
-        Stroke::new(
-            2.0,
-            if accent {
-                theme::CORAL_INK
-            } else {
-                theme::CORAL_HOVER
-            },
-        )
+        Stroke::new(2.0, theme::CORAL_INK)
     } else {
-        Stroke::new(1.0, theme::LINE)
+        Stroke::new(1.0, tone.gamma_multiply(0.45))
     };
     let painter = ui.painter();
     painter.rect_filled(rect, CornerRadius::same(12), fill);
     painter.rect_stroke(rect, CornerRadius::same(12), stroke, StrokeKind::Inside);
-    let ink = if accent {
+    let ink = if selected {
         theme::CORAL_INK
     } else {
         theme::TEXT
     };
-    let muted = if accent {
+    let muted = if selected {
         theme::CORAL_INK.gamma_multiply(0.8)
     } else {
         theme::MUTED
@@ -1104,7 +1143,7 @@ fn stat_card(
         rect.left_top() + Vec2::new(16.0, 13.0),
         Align2::LEFT_TOP,
         format!("{} · {}", format_int(value), label),
-        FontId::proportional(if accent { 17.0 } else { 15.0 }),
+        FontId::proportional(16.0),
         ink,
     );
     painter.text(
@@ -1115,6 +1154,28 @@ fn stat_card(
         muted,
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Short list of the accepted codecs, such as "H.265 oppure AV1".
+fn accepted_summary(accepted: &[String]) -> String {
+    let labels: Vec<&str> = KNOWN_CODECS
+        .iter()
+        .filter(|(key, _)| accepted.iter().any(|value| value == key))
+        .map(|(_, label)| label.split(" · ").next().unwrap_or(label))
+        .collect();
+    if labels.is_empty() {
+        "Nessun codec accettato".to_string()
+    } else {
+        labels.join(" oppure ")
+    }
+}
+
+fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    const PNG: &[u8] = include_bytes!("../../../deployment/fotogramma.iconset/icon_64x64@2x.png");
+    let image = image::load_from_memory(PNG).ok()?.to_rgba8();
+    let size = [image.width() as usize, image.height() as usize];
+    let color = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+    Some(ctx.load_texture("logo", color, egui::TextureOptions::LINEAR))
 }
 
 fn composition_bar(
@@ -1278,7 +1339,7 @@ mod snapshot_tests {
                 app.selected
                     .insert(PathBuf::from("/Filmati/Gita al lago.mp4"));
                 let selected = app.selected_videos();
-                app.conversion_dialog = Some(ConversionDialog::new(selected));
+                app.conversion_dialog = Some(ConversionDialog::new(selected, &app.settings));
                 app
             });
         harness.run();
@@ -1310,10 +1371,35 @@ mod small_snapshot_tests {
                 app.selected
                     .insert(PathBuf::from("/Filmati/Gita al lago.mp4"));
                 let selected = app.selected_videos();
-                app.conversion_dialog = Some(ConversionDialog::new(selected));
+                app.conversion_dialog = Some(ConversionDialog::new(selected, &app.settings));
                 app
             });
         harness.run();
         harness.snapshot("conversion-dialog-small");
+    }
+
+    #[test]
+    fn accepted_codecs_reclassify_the_loaded_library() {
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let app = harness.state_mut();
+        assert!(app.summary.compatible > 0 && app.summary.to_convert > 0);
+        app.settings.accepted_codecs = vec!["h264".to_string()];
+        app.apply_settings();
+        assert_eq!(
+            app.summary.compatible,
+            app.videos
+                .iter()
+                .filter(|v| v.codec.as_deref() == Some("h264") && v.error.is_none())
+                .count()
+        );
+        assert!(app
+            .videos
+            .iter()
+            .filter(|v| v.codec.as_deref() == Some("hevc"))
+            .all(|v| v.category == fotogramma_core::scanner::Category::Convert));
+        assert_eq!(app.summary.errors, 1);
     }
 }
