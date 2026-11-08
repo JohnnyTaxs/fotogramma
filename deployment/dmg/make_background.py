@@ -14,7 +14,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 HERE = Path(__file__).resolve().parent
-FONT = HERE.parents[1] / "static" / "fonts" / "Sora-Variable.ttf"
+FONT = HERE.parents[1] / "static" / "fonts" / "Outfit-Regular.ttf"
 WIDTH, HEIGHT = 660, 400
 SCALE = 2
 

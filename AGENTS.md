@@ -8,7 +8,7 @@ Operational guide for agents modifying **Fotogramma Desktop** (v2, Rust). The we
 - **Default mode never overwrites originals.** Replacement is allowed only after HEVC, duration, stream, full-decode, and final-codec validation, with an atomic backup restored on failure.
 - By default `hevc` and `av1` are `compatible`; every other valid codec is `convert`; read failures are `error`. The user can change the accepted codecs in the settings window: the probe keeps the defaults and the app re-applies the list with `reclassify`, so a change never needs a new scan. Verification after a conversion still requires `hevc`.
 - Only the first video stream (`v:0`) of `.mp4`, `.mkv`, and `.webm` is analyzed.
-- **The interface font cannot draw everything, and egui panics on a missing glyph.** `✓`, `→`, bullets and emoji are missing from the proportional font (monospace has `✓`). Never put them in proportional text; text from outside, such as release notes, goes through `markdown::sanitize`.
+- **The interface font cannot draw everything, and egui panics on a missing glyph.** Outfit has accents, `·`, `…`, `×`, bullets, `← ↑ → ↓` and `✓`; it has no `✔`, `⇒`, emoji, or CJK (and monospace has `✓` but not the arrows). Add a new symbol only after rendering it in a test; text from outside, such as release notes, goes through `markdown::sanitize`.
 - **x265 has no `film` tune** (that is x264): never pass `-tune film`; the valid tunes here are `animation` and `grain`. Content type (`MediaKind` in `conversion.rs`) only chooses the tune: anime → `animation`, live action → none. Detection reads the folders only, and anime anywhere in the path wins.
 - No CDN or online service is required at runtime; if GitHub is unreachable the app works exactly the same.
 - **Updates are verified before they are installed.** The package must be an asset of this repository's release, its SHA-256 must match `SHA256SUMS.txt` (published by `create_release.py`), and on macOS `codesign --verify` must pass before the swap. A development binary (`cargo run`) is never replaced. The swap runs in a helper script after the app quits and restores the old copy if the move fails.
@@ -59,7 +59,7 @@ Linux and Windows build x265 with `deployment/ffmpeg/build_x265.sh` (8-bit + 10-
 | `crates/app/src/table.rs` | Virtualized table, filters, sorting, selection, exact column widths. |
 | `crates/app/src/dialogs.rs` | Preferences window, conversion settings, command preview, progress, results, close confirmation. |
 | `crates/app/src/worker.rs` | Scan and conversion threads; communicate only through channels. |
-| `crates/app/src/theme.rs` | Cinema Pop colors and embedded Sora/IBM Plex Mono. Do not introduce HTML/CSS or a second theme. |
+| `crates/app/src/theme.rs` | Cinema Pop colors and embedded Outfit/IBM Plex Mono. Do not introduce HTML/CSS or a second theme. |
 | `crates/app/src/settings.rs` | TOML preferences and defaults (accepted codecs, conversion defaults); config directory disabled under `cfg!(test)`. |
 | `crates/app/src/platform.rs` | Open a folder in the system file manager. |
 

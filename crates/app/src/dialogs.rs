@@ -1515,9 +1515,8 @@ pub fn show_update(ctx: &egui::Context, dialog: &mut UpdateDialog, busy: bool) -
                     .size(21.0)
                     .strong(),
             );
-            ui.label(fotogramma_core::tr!(
-                "Versione attuale {} · nuova versione {}",
-                "Current version {} · new version {}",
+            ui.label(format!(
+                "{} → {}",
                 env!("CARGO_PKG_VERSION"),
                 dialog.release.version
             ));

@@ -6,8 +6,8 @@
 //! shown as plain text.
 //!
 //! The notes come from the network, so the text is sanitized first: the
-//! interface font cannot draw every character and egui refuses to lay out a
-//! missing glyph.
+//! interface font cannot draw every character (it has arrows and a check mark,
+//! not emoji or CJK) and egui refuses to lay out a missing glyph.
 
 use eframe::egui::{self, text::LayoutJob, Color32, FontId, Stroke, TextFormat, Vec2};
 
@@ -39,14 +39,16 @@ pub fn sanitize(text: &str) -> String {
     for character in text.chars() {
         match character {
             '\n' | '\t' => out.push(character),
-            '→' | '⇒' | '›' => out.push_str("->"),
-            '←' => out.push_str("<-"),
+            '⇒' | '›' => out.push_str("->"),
             '•' | '▪' | '◦' => out.push('·'),
-            '✔' | '✅' | '✓' => out.push_str("OK"),
+            '✔' | '✅' => out.push('✓'),
             c if c.is_ascii() && (c.is_ascii_graphic() || c == ' ') => out.push(c),
             // Latin-1 and Latin Extended: accents, ×, ·, …
             c if ('\u{00A0}'..='\u{024F}').contains(&c) => out.push(c),
-            '’' | '‘' | '“' | '”' | '…' | '–' | '—' => out.push(character),
+            // Arrows and the check mark are in the interface font (Outfit).
+            '’' | '‘' | '“' | '”' | '…' | '–' | '—' | '←' | '↑' | '→' | '↓' | '✓' => {
+                out.push(character)
+            }
             c if c.is_whitespace() => out.push(' '),
             _ => out.push('?'),
         }
@@ -444,9 +446,14 @@ mod tests {
 
     #[test]
     fn sanitizing_keeps_what_the_font_draws_and_replaces_the_rest() {
-        assert_eq!(sanitize("Settings → Updates"), "Settings -> Updates");
+        assert_eq!(sanitize("Settings → Updates ←↑↓"), "Settings → Updates ←↑↓");
         assert_eq!(sanitize("è ’quote’ … – ×"), "è ’quote’ … – ×");
-        assert_eq!(sanitize("done ✔ ✓"), "done OK OK");
+        assert_eq!(sanitize("done ✔ ✓"), "done ✓ ✓");
+        assert_eq!(
+            sanitize("a ⇒ b"),
+            "a -> b",
+            "a double arrow is not in the font"
+        );
         assert_eq!(sanitize("日本"), "??");
         assert_eq!(sanitize("a\u{200b}b"), "a?b");
         assert_eq!(sanitize("line\nbreak"), "line\nbreak");

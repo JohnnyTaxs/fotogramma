@@ -46,9 +46,9 @@ pub fn proportional(size: f32) -> FontId {
 pub fn install(ctx: &eframe::egui::Context) {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert(
-        "sora".to_string(),
+        "outfit".to_string(),
         Arc::new(FontData::from_static(include_bytes!(
-            "../../../static/fonts/Sora-Variable.ttf"
+            "../../../static/fonts/Outfit-Regular.ttf"
         ))),
     );
     fonts.font_data.insert(
@@ -61,7 +61,7 @@ pub fn install(ctx: &eframe::egui::Context) {
         .families
         .entry(FontFamily::Proportional)
         .or_default()
-        .insert(0, "sora".to_string());
+        .insert(0, "outfit".to_string());
     fonts
         .families
         .entry(FontFamily::Monospace)

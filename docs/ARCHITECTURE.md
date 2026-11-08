@@ -124,7 +124,7 @@ Profile selection, custom CRF/preset/pixel format/tune/AQ controls, audio mode, 
 
 ### `crates/app/src/theme.rs`
 
-Cinema Pop colors and embedded **Sora** / **IBM Plex Mono** fonts (SIL Open Font License, licenses in `static/fonts/`). `Visuals::strong_text_color()` derives from `widgets.active.fg_stroke`; it must stay light or `.strong()` labels become nearly invisible.
+Cinema Pop colors and embedded **Outfit** (a static Regular instance of the variable font, because egui cannot pick a weight and the default would be Thin) / **IBM Plex Mono** fonts (SIL Open Font License, licenses in `static/fonts/`). `Visuals::strong_text_color()` derives from `widgets.active.fg_stroke`; it must stay light or `.strong()` labels become nearly invisible.
 
 ### `crates/app/src/settings.rs`
 

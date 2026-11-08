@@ -2084,7 +2084,7 @@ mod small_snapshot_tests {
                 let mut app = demo_app(cc);
                 let mut release = release("v9.9.9");
                 release.notes =
-                    "# Novità → 日本語 🎉\n\n- **Nuovo** ✔ ✓ è ’a’ ‘b’ “c” … – — × · © ½ test\n"
+                    "# Novità → 日本語 🎉\n\n- **Nuovo** ✔ ✓ è ’a’ ‘b’ “c” … – — × · © ½ ← ↑ → ↓ ⇒ test\n"
                         .to_string();
                 app.update = Some(UpdateDialog::new(release, None));
                 app
