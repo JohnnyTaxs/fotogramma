@@ -4,7 +4,7 @@ Operational guide for agents modifying **Fotogramma Desktop** (v2, Rust). The we
 
 ## Invariants
 
-- **Native desktop only** through `egui`/`eframe` with the `glow` (OpenGL) renderer. No HTTP server, Electron, Tauri, Qt, or WebView. An external browser is allowed only for the user-requested 1337x.to search.
+- **Native desktop only** through `egui`/`eframe` with the `glow` (OpenGL) renderer. No HTTP server, Electron, Tauri, Qt, WebView, or external browser. The app makes no network request at runtime.
 - **Default mode never overwrites originals.** Replacement is allowed only after HEVC, duration, stream, full-decode, and final-codec validation, with an atomic backup restored on failure.
 - `hevc` and `av1` are `compatible`; every other valid codec is `convert`; read failures are `error`.
 - Only the first video stream (`v:0`) of `.mp4`, `.mkv`, and `.webm` is analyzed.
@@ -49,14 +49,13 @@ Linux and Windows build x265 with `deployment/ffmpeg/build_x265.sh` (8-bit + 10-
 | `rust/crates/core/src/media_tools.rs` | ffmpeg/ffprobe resolution in source and packaged builds; `DYLD_LIBRARY_PATH` only on macOS. |
 | `rust/crates/core/src/conversion.rs` | Profiles and FFmpeg arguments. Use `-n`, `-map 0`, and non-overwriting output. |
 | `rust/crates/core/src/verification.rs` | Codec/duration/stream validation, full decode, and atomic backup replacement. |
-| `rust/crates/core/src/search.rs` | External 1337x.to URLs only; no integrated network requests. |
 | `rust/crates/app/src/app.rs` | Entry state, layout, selection, scan flow, smoke test, four snapshots. |
 | `rust/crates/app/src/table.rs` | Virtualized table, filters, sorting, selection, exact column widths. |
 | `rust/crates/app/src/dialogs.rs` | Conversion settings, command preview, progress, results, close confirmation. |
 | `rust/crates/app/src/worker.rs` | Scan and conversion threads; communicate only through channels. |
 | `rust/crates/app/src/theme.rs` | Cinema Pop colors and embedded Sora/IBM Plex Mono. Do not introduce HTML/CSS or a second theme. |
 | `rust/crates/app/src/settings.rs` | TOML preferences; config directory disabled under `cfg!(test)`. |
-| `rust/crates/app/src/platform.rs` | Open a folder or the external browser. |
+| `rust/crates/app/src/platform.rs` | Open a folder in the system file manager. |
 
 Data flow: directory → `discover_videos` → `probe_videos` → `mpsc` → app state → `TableBuilder`.
 

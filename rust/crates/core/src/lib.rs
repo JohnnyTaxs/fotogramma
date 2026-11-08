@@ -10,7 +10,6 @@ pub mod conversion;
 pub mod formatting;
 pub mod media_tools;
 pub mod scanner;
-pub mod search;
 pub mod verification;
 
 pub use scanner::{Category, ProbeError, Summary, VideoInfo};

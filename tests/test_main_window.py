@@ -73,7 +73,7 @@ class MainWindowTests(unittest.TestCase):
         self.assertFalse(self.window.partial_notice.isHidden())
         self.assertIn("incompleto", self.window.partial_notice.text())
 
-    def test_selection_enables_online_search_and_conversion(self):
+    def test_selection_enables_conversion(self):
         self.window._scan_completed(
             [video("one.mp4", "convert", "h264", 100), video("two.mp4", "convert", "h264", 200)],
             [],
@@ -85,7 +85,6 @@ class MainWindowTests(unittest.TestCase):
             QItemSelectionModel.Select | QItemSelectionModel.Rows,
         )
         self.window._update_actions()
-        self.assertTrue(self.window.search_online_button.isEnabled())
         self.assertTrue(self.window.convert_button.isEnabled())
 
         selection.select(
@@ -93,7 +92,6 @@ class MainWindowTests(unittest.TestCase):
             QItemSelectionModel.Select | QItemSelectionModel.Rows,
         )
         self.window._update_actions()
-        self.assertFalse(self.window.search_online_button.isEnabled())
         self.assertTrue(self.window.convert_button.isEnabled())
 
     def test_conversion_dialog_layout_keeps_content_visible(self):

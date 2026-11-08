@@ -1,6 +1,6 @@
 # Fotogramma
 
-Fotogramma is a **native desktop application** for inspecting a video library, identifying files that may benefit from H.265 conversion, searching for an existing H.265 version online, and converting videos directly with FFmpeg.
+Fotogramma is a **native desktop application** for inspecting a video library, identifying files that may benefit from H.265 conversion, and converting videos directly with FFmpeg.
 
 Version 2 is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no browser, WebView, HTTP server, or launcher.
 
@@ -14,7 +14,6 @@ Version 2 is written in **Rust** with `egui`/`eframe` and renders with OpenGL: n
 - Recursive discovery of `.mp4`, `.mkv`, and `.webm` files.
 - Clear grouping into **to convert**, **already compatible** (HEVC/AV1), and **unreadable** files.
 - Statistics, filters, search, sortable columns, and multi-file selection.
-- **Find H.265 online** opens a cleaned-up search on 1337x.to in your default browser.
 - **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
 - Full-output validation before replacing an original file.
 - Original application icon and Cinema Pop theme.
@@ -58,12 +57,6 @@ The default output is a new `.h265.mkv` or `.h265.mp4` file with a numeric suffi
 5. The replacement passes a final codec check before the temporary backup is deleted.
 
 If any check fails, the original remains unchanged. Replacement uses an atomic rename on the same filesystem and a `.fotogramma-backup` file that is removed only after success. The container must match the original extension (MKV or MP4); WebM replacement is not supported.
-
-## Online search
-
-Select one convertible video and choose **Find H.265 online**. Fotogramma opens `https://1337x.to/search/<title+H.265>/1/` in your default browser.
-
-No content is downloaded, no torrent client is integrated, and no WebView is embedded. Common release tags are removed from the title to improve search results. A query is sent outside your computer only when you explicitly choose this action.
 
 ## Run the portable app
 
@@ -119,7 +112,7 @@ cd rust
 cargo test --workspace
 ```
 
-The suite covers discovery, probing, classification, presets, FFmpeg arguments, output allocation, duration/stream/full-decode validation, atomic replacement and backup restoration, settings, search URLs, the virtualized table, and four `egui_kittest` snapshots (main window and conversion dialog at 1280×820 and 1050×680).
+The suite covers discovery, probing, classification, presets, FFmpeg arguments, output allocation, duration/stream/full-decode validation, atomic replacement and backup restoration, settings, the virtualized table, and four `egui_kittest` snapshots (main window and conversion dialog at 1280×820 and 1050×680).
 
 Two optional end-to-end tests convert a generated clip and verify atomic replacement with real FFmpeg binaries. They use the system tools by default, or the packaged minimal tools when `FOTOGRAMMA_FFMPEG_DIR` is set:
 
@@ -157,7 +150,6 @@ rust/
     src/media_tools.rs     ffmpeg/ffprobe resolution and DYLD environment
     src/conversion.rs      Presets, FFmpeg arguments, safe output allocation
     src/verification.rs    Full validation and atomic backup replacement
-    src/search.rs          Title cleanup and external 1337x.to URLs
     src/formatting.rs      Italian number and size formatting
   crates/app/              egui/eframe application
     src/app.rs             Window, layout, scan flow, snapshots
@@ -166,7 +158,7 @@ rust/
     src/worker.rs          Scan and conversion threads with channels
     src/theme.rs           Cinema Pop colors, fonts, visuals
     src/settings.rs        TOML settings (directory and window size only)
-    src/platform.rs        Open folder / open browser
+    src/platform.rs        Open folder in the system file manager
 deployment/
   ffmpeg/                  Minimal FFmpeg build and vendor collectors
   build_rust.py            Packaging, ZIP, signature round-trip, size budget
@@ -186,7 +178,7 @@ static/                    Fonts and licenses
 
 ## Privacy and license
 
-The app opens no server and sends no data online during scanning or conversion. Only the explicit 1337x.to search opens an external URL containing the video title.
+The app opens no server, no browser, and sends no data online. Scaling and conversion run locally with the bundled FFmpeg.
 
 Fotogramma itself is released under the **MIT License**. See [`LICENSE`](LICENSE) for the full text, including the warranty disclaimer.
 

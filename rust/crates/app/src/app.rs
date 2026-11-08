@@ -7,7 +7,6 @@ use eframe::egui::{
 use fotogramma_core::formatting::{format_bytes, format_int};
 use fotogramma_core::media_tools::{ffprobe_path, ffprobe_version};
 use fotogramma_core::scanner::{summarize, DiscoveryWarning, Summary, VideoInfo};
-use fotogramma_core::search::h265_search_url;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -780,18 +779,6 @@ impl FotogrammaApp {
                     .clicked()
                 {
                     self.conversion_dialog = Some(ConversionDialog::new(selected.clone()));
-                }
-                if ui
-                    .add_enabled(
-                        selected.len() == 1,
-                        theme::secondary_button("Cerca H.265 online"),
-                    )
-                    .on_hover_text("Apre 1337x.to nel browser; nessun download integrato")
-                    .clicked()
-                {
-                    if let Some(video) = selected.first() {
-                        platform::open_url(&h265_search_url(&video.name));
-                    }
                 }
             });
         });

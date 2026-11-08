@@ -30,7 +30,7 @@ eframe + egui (glow / OpenGL)
 
 | Crate | Responsibility |
 | --- | --- |
-| `fotogramma-core` | Discovery, probing, classification, conversion profiles, FFmpeg arguments, verification, search URLs, formatting. No UI dependency. |
+| `fotogramma-core` | Discovery, probing, classification, conversion profiles, FFmpeg arguments, verification, formatting. No UI dependency. |
 | `fotogramma` | `eframe` window, table, dialogs, theme, settings, worker threads, platform helpers. |
 
 Release profile: `lto = "fat"`, `codegen-units = 1`, `panic = "abort"`, `strip = true`, `opt-level = "z"`. The executable is about 3.3 MB.
@@ -76,10 +76,6 @@ Verified replacement has two separate phases:
 
 If any test fails, no replacement occurs. If the final check fails after renaming, the backup restores the original. On Windows, the failed output is removed before restoring because `rename` cannot replace an existing file.
 
-### `crates/core/src/search.rs`
-
-Cleans release tags from the title and builds `https://1337x.to/search/<title+H.265>/1/`, including the required first-page suffix. The browser opens only after an explicit user action; the app makes no network request itself.
-
 ### `crates/app/src/app.rs`
 
 Owns the window state: directory, scan lifecycle, filters, selection, sorting, warnings, conversion dialog, and progress session. All widget interaction happens in the GUI thread. Smoke-test mode closes the window after startup or after the scan completes.
@@ -124,7 +120,7 @@ The build fails when the application exceeds 45 MB or the ZIP exceeds 18 MB.
 
 ## Testing
 
-- Core unit tests for discovery, probing, classification, presets, arguments, allocation, verification tolerance, search, and formatting.
+- Core unit tests for discovery, probing, classification, presets, arguments, allocation, verification tolerance, and formatting.
 - App unit tests for settings, selection, filters, and dialog outcomes.
 - Four `egui_kittest` snapshots, accepted with `UPDATE_SNAPSHOTS=1 cargo test`.
 - Two real FFmpeg pipeline tests for copy mode and atomic replacement; they skip when no tools are installed.

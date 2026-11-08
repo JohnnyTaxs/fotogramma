@@ -1,11 +1,7 @@
-//! Opening external URLs and folders without a browser or server inside the app.
+//! Opening folders in the system file manager, without a browser or server.
 
 use std::path::Path;
 use std::process::Command;
-
-pub fn open_url(url: &str) {
-    open_target(url);
-}
 
 pub fn open_folder(path: &Path) {
     open_target(&path.to_string_lossy());

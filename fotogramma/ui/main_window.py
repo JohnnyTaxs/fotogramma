@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QSize, Qt, QUrl
-from PySide6.QtGui import QCloseEvent, QDesktopServices
+from PySide6.QtCore import QSettings, QSize, Qt
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -29,7 +29,6 @@ from PySide6.QtWidgets import (
 )
 
 from fotogramma.core.scanner import get_ffprobe_path, get_ffprobe_version, summarize
-from fotogramma.core.search import h265_search_url
 from fotogramma.ui.conversion_dialog import ConversionDialog, ConversionProgressDialog
 from fotogramma.ui.formatting import codec_label, format_bytes, format_duration, format_int
 from fotogramma.ui.models import VideoFilterProxy, VideoTableModel
@@ -284,12 +283,6 @@ class MainWindow(QMainWindow):
         self.selected_label = QLabel("Seleziona un video per vedere le azioni")
         self.selected_label.setObjectName("muted")
         action_bar.addWidget(self.selected_label, 1)
-        self.search_online_button = QPushButton("Cerca H.265 online")
-        self.search_online_button.setIcon(self.style().standardIcon(QStyle.SP_DriveNetIcon))
-        self.search_online_button.setToolTip("Apre 1337x.to nel browser; nessun download integrato")
-        self.search_online_button.clicked.connect(self.open_h265_search)
-        self.search_online_button.setEnabled(False)
-        action_bar.addWidget(self.search_online_button)
         self.convert_button = QPushButton("Converti selezionati")
         self.convert_button.setObjectName("primaryButton")
         self.convert_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
@@ -518,17 +511,11 @@ class MainWindow(QMainWindow):
 
     def _update_actions(self) -> None:
         videos = self._selected_convertible()
-        self.search_online_button.setEnabled(len(videos) == 1)
         self.convert_button.setEnabled(bool(videos))
         if videos:
             self.selected_label.setText(f"{format_int(len(videos))} video da convertire selezionati")
         else:
             self.selected_label.setText("Seleziona uno o più video da convertire per vedere le azioni")
-
-    def open_h265_search(self) -> None:
-        videos = self._selected_convertible()
-        if len(videos) == 1:
-            QDesktopServices.openUrl(QUrl(h265_search_url(videos[0].name)))
 
     def start_conversion(self) -> None:
         videos = self._selected_convertible()

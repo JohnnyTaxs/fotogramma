@@ -10,7 +10,6 @@ from fotogramma.core.conversion import PROFILES, allocate_output_path, allocate_
 from fotogramma.core.verification import replace_verified_output, validate_conversion_output
 from fotogramma.core.media_tools import get_ffmpeg_path
 from fotogramma.core.scanner import get_ffprobe_path, probe_video
-from fotogramma.core.search import h265_search_url, title_for_search
 from fotogramma.ui.workers import ConversionWorker
 
 
@@ -44,20 +43,6 @@ class ConversionProfileTests(unittest.TestCase):
             first.touch()
             second = allocate_output_path(str(source), directory)
             self.assertEqual(second.name, "movie (1).h265.mkv")
-
-
-class SearchTests(unittest.TestCase):
-    def test_search_url_cleans_release_tags(self):
-        self.assertEqual(title_for_search("1917 - Bluray-2160p - [IT+EN].mkv"), "1917")
-        self.assertEqual(
-            h265_search_url("1917 - Bluray-2160p - [IT+EN].mkv"),
-            "https://1337x.to/search/1917+H.265/1/",
-        )
-
-    def test_search_keeps_episode_information(self):
-        title = title_for_search("Example Show - S01E02 - Title - WEBDL-1080p.mkv")
-        self.assertIn("S01E02", title)
-        self.assertIn("Example Show", title)
 
 
 class RealConversionTests(unittest.TestCase):
