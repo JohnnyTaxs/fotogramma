@@ -392,6 +392,16 @@ impl FotogrammaApp {
         self.status = Some((message.into(), Instant::now() + duration));
     }
 
+    /// Paths of the videos in `visible` that can be converted.
+    fn convertible_in(&self, visible: &[usize]) -> Vec<PathBuf> {
+        visible
+            .iter()
+            .map(|index| &self.videos[*index])
+            .filter(|video| video.category == fotogramma_core::scanner::Category::Convert)
+            .map(|video| video.path.clone())
+            .collect()
+    }
+
     fn selected_videos(&self) -> Vec<VideoInfo> {
         self.videos
             .iter()
@@ -1037,7 +1047,11 @@ impl FotogrammaApp {
             });
         });
 
+        let visible = table::visible_indices(&self.videos, self.filter, &self.query, self.sort);
+        let convertible = self.convertible_in(&visible);
         let selected = self.selected_videos();
+        let all_selected =
+            !convertible.is_empty() && convertible.iter().all(|path| self.selected.contains(path));
         ui.horizontal(|ui| {
             let label = if selected.is_empty() {
                 tr_str(
@@ -1068,10 +1082,40 @@ impl FotogrammaApp {
                     self.conversion_dialog =
                         Some(ConversionDialog::new(selected.clone(), &self.settings));
                 }
+                // Select everything that can be converted in the current view
+                // (so the filter and the search narrow it), or clear it again.
+                if all_selected || (!selected.is_empty() && convertible.is_empty()) {
+                    if ui
+                        .add(theme::secondary_button(tr_str(
+                            "Deseleziona",
+                            "Clear selection",
+                        )))
+                        .clicked()
+                    {
+                        self.selected.clear();
+                        self.selection_anchor = None;
+                    }
+                } else if ui
+                    .add_enabled(
+                        !convertible.is_empty(),
+                        theme::secondary_button(fotogramma_core::tr!(
+                            "Seleziona tutti ({})",
+                            "Select all ({})",
+                            format_int(convertible.len())
+                        )),
+                    )
+                    .on_hover_text(tr_str(
+                        "Seleziona tutti i video da convertire nella vista attuale",
+                        "Selects every video to convert in the current view",
+                    ))
+                    .clicked()
+                {
+                    self.selected.extend(convertible.iter().cloned());
+                    self.selection_anchor = None;
+                }
             });
         });
 
-        let visible = table::visible_indices(&self.videos, self.filter, &self.query, self.sort);
         let mut action = None;
         ui.scope(|ui| {
             let height = (ui.available_height() - 26.0).max(120.0);
@@ -1747,5 +1791,59 @@ mod small_snapshot_tests {
         assert!(app.update.is_none());
         offer(app, "v9.9.9", true);
         assert!(app.update.is_some());
+    }
+
+    #[test]
+    fn select_all_takes_every_convertible_video_in_the_view() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        harness.get_by_label("Seleziona tutti (2)").click();
+        harness.run();
+        assert_eq!(harness.state().selected.len(), 2);
+        // Once everything is selected the same button clears it.
+        harness.get_by_label("Deseleziona").click();
+        harness.run();
+        assert!(harness.state().selected.is_empty());
+    }
+
+    #[test]
+    fn select_all_follows_the_filter_and_the_search() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.query = "tramonto".to_string();
+                app
+            });
+        harness.run();
+        harness.get_by_label("Seleziona tutti (1)").click();
+        harness.run();
+        let selected = &harness.state().selected;
+        assert_eq!(selected.len(), 1);
+        assert!(selected.iter().all(|path| path.ends_with("Tramonto.mkv")));
+    }
+
+    #[test]
+    fn select_all_is_disabled_when_nothing_can_be_converted() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.filter = FilterCategory::Compatible;
+                app
+            });
+        harness.run();
+        assert!(harness
+            .get_by_label("Seleziona tutti (0)")
+            .accesskit_node()
+            .is_disabled());
     }
 }

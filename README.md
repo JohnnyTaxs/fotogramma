@@ -16,7 +16,7 @@ It is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no brows
 - Native desktop window for macOS, Windows, and Linux.
 - Recursive discovery of `.mp4`, `.mkv`, and `.webm` files.
 - Clear grouping into **to convert**, **already compatible** (HEVC and AV1 by default), and **unreadable** files.
-- Statistics, filters, search, sortable columns, and multi-file selection.
+- Statistics, filters, search, sortable columns, and multi-file selection, with a **Select all** button for everything convertible in the current view.
 - **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
 - Full-output validation before replacing an original file.
 - **Content type:** anime or live action (films and series). Anime gets `-tune animation`; "Automatic" reads the folders of the path (`Anime`, `Film`, `Serie TV`, `Movies`…), in English and Italian.
@@ -142,7 +142,7 @@ The application looks for the media tools in the executable folder, `bin/` besid
 1. Choose a folder with **Browse** (*Sfoglia*) or enter its path.
 2. Click **Scan library** (*Analizza libreria*).
 3. Use statistics and filters to narrow down candidates.
-4. Select one or more videos to reveal available actions.
+4. Select one or more videos to reveal available actions, or click **Select all** to take every convertible video in the current view (the filter and the search narrow it; the button then turns into **Clear selection**).
 5. Click a column header to sort and double-click a video for details.
 6. Convert directly or export the list for another tool.
 7. Adjust the language, the accepted codecs, and the conversion defaults in **Settings** (*Impostazioni*).
