@@ -39,6 +39,8 @@ git diff --check
 
 Windows builds use `deployment/ffmpeg/build_minimal_windows.sh` inside MSYS2 MINGW64. Never substitute the full Homebrew/community FFmpeg archive: it breaks the size budget.
 
+Linux and Windows build x265 with `deployment/ffmpeg/build_x265.sh` (8-bit + 10-bit only, static C++ runtime) instead of installing the distribution package; macOS uses Homebrew's arm64 x265.
+
 ## Architecture
 
 | File | Rules |
