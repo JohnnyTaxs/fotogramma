@@ -142,6 +142,7 @@ pub fn show(
     videos: &[VideoInfo],
     visible: &[usize],
     selected: &std::collections::HashSet<std::path::PathBuf>,
+    converted: &std::collections::HashMap<std::path::PathBuf, std::path::PathBuf>,
     sort: &mut SortState,
 ) -> Option<TableAction> {
     let mut action = None;
@@ -253,14 +254,38 @@ pub fn show(
                             Category::Compatible => theme::MINT,
                             Category::Error => theme::ERROR,
                         };
-                        ui.label(RichText::new(video.status_label()).strong().color(color));
+                        if converted.contains_key(&video.path) {
+                            ui.label(
+                                RichText::new(tr_str("Già convertito", "Already converted"))
+                                    .strong()
+                                    .color(theme::LAVENDER),
+                            );
+                        } else {
+                            ui.label(RichText::new(video.status_label()).strong().color(color));
+                        }
                     });
 
                     let response = row.response();
-                    let tooltip = match &video.error {
+                    let mut tooltip = match &video.error {
                         Some(error) => format!("{}\n\n{error}", video.path.display()),
                         None => video.path.display().to_string(),
                     };
+                    if let Some(output) = converted.get(&video.path) {
+                        tooltip.push_str("\n\n");
+                        tooltip.push_str(&if *output == video.path {
+                            tr_str(
+                                "Originale sostituito dopo verifica",
+                                "Original replaced after verification",
+                            )
+                            .to_string()
+                        } else {
+                            fotogramma_core::tr!(
+                                "Convertito in: {}",
+                                "Converted to: {}",
+                                output.display()
+                            )
+                        });
+                    }
                     let response = response.on_hover_text(tooltip);
                     if response.double_clicked() {
                         action = Some(TableAction::Open(video_index));

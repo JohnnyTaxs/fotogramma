@@ -9,7 +9,7 @@ use fotogramma_core::media_tools::{ffprobe_path, ffprobe_version};
 use fotogramma_core::scanner::{
     classify_codec, reclassify, summarize, DiscoveryWarning, Summary, VideoInfo,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
@@ -75,6 +75,9 @@ pub struct FotogrammaApp {
     query: String,
     sort: SortState,
     selected: HashSet<PathBuf>,
+    /// Videos converted in this session: original path -> the file made (the
+    /// original path itself when it was replaced). Not saved.
+    converted: HashMap<PathBuf, PathBuf>,
     selection_anchor: Option<usize>,
     status: Option<(String, Instant)>,
     engine_status: String,
@@ -136,6 +139,7 @@ impl FotogrammaApp {
             query: String::new(),
             sort: SortState::default(),
             selected: HashSet::new(),
+            converted: HashMap::new(),
             selection_anchor: None,
             status: None,
             engine_status,
@@ -317,6 +321,7 @@ impl FotogrammaApp {
                     self.cancelled = cancelled;
                     self.summary = summarize(&self.videos, None);
                     self.selected.clear();
+                    self.converted.clear();
                     self.selection_anchor = None;
                     self.filter = FilterCategory::Convert;
                     self.page = Page::Results;
@@ -398,6 +403,7 @@ impl FotogrammaApp {
             .iter()
             .map(|index| &self.videos[*index])
             .filter(|video| video.category == fotogramma_core::scanner::Category::Convert)
+            .filter(|video| !self.converted.contains_key(&video.path))
             .map(|video| video.path.clone())
             .collect()
     }
@@ -570,26 +576,56 @@ impl FotogrammaApp {
         ctx.request_repaint();
     }
 
+    /// Keep the library in step with the conversions of the session. A video
+    /// whose original was replaced moves to the compatible ones; one that was
+    /// converted into a new file stays where it is but is marked as done, so
+    /// it is not converted twice by accident.
     fn mark_replaced_videos(&mut self) {
-        if let Some(session) = &self.session {
-            let replaced: Vec<PathBuf> = session
-                .results
-                .iter()
-                .filter(|result| result.replaced)
-                .map(|result| result.source.clone())
-                .collect();
-            let accepted = self.settings.accepted_codecs.clone();
-            for video in &mut self.videos {
-                if replaced.contains(&video.path) {
+        let Some(session) = &self.session else {
+            return;
+        };
+        let accepted = self.settings.accepted_codecs.clone();
+        let mut replaced_any = false;
+        for result in session.results.iter().filter(|result| result.success) {
+            if self.converted.get(&result.source) == Some(&result.destination) {
+                continue;
+            }
+            self.converted
+                .insert(result.source.clone(), result.destination.clone());
+            self.selected.remove(&result.source);
+            if result.replaced {
+                if let Some(video) = self.videos.iter_mut().find(|v| v.path == result.source) {
                     video.category = classify_codec("hevc", &accepted);
                     video.codec = Some("hevc".to_string());
                     video.error = None;
+                    if result.new_size.is_some() {
+                        video.size = result.new_size;
+                    }
                 }
-            }
-            if !replaced.is_empty() {
-                self.summary = summarize(&self.videos, None);
+                replaced_any = true;
             }
         }
+        if replaced_any {
+            self.summary = summarize(&self.videos, None);
+        }
+    }
+
+    /// Videos still to convert, how many were already converted in this
+    /// session, and the bytes still to process.
+    fn conversion_progress(&self) -> (usize, usize, u64) {
+        let (mut pending, mut done, mut bytes) = (0, 0, 0);
+        for video in &self.videos {
+            if video.category != fotogramma_core::scanner::Category::Convert {
+                continue;
+            }
+            if self.converted.contains_key(&video.path) {
+                done += 1;
+            } else {
+                pending += 1;
+                bytes += video.size.unwrap_or(0);
+            }
+        }
+        (pending, done, bytes)
     }
 
     fn save(&mut self, ctx: &egui::Context) {
@@ -885,6 +921,7 @@ impl FotogrammaApp {
         });
         ui.add_space(6.0);
 
+        let (pending, done, pending_bytes) = self.conversion_progress();
         let spacing = 10.0;
         let width = ((ui.available_width() - spacing * 3.0) / 5.0).max(100.0);
         ui.horizontal(|ui| {
@@ -906,11 +943,20 @@ impl FotogrammaApp {
                     "convert",
                     self.summary.to_convert,
                     tr_str("Da convertire", "To convert"),
-                    fotogramma_core::tr!(
-                        "{} da elaborare",
-                        "{} to process",
-                        format_bytes(Some(self.summary.to_convert_bytes))
-                    ),
+                    if done > 0 {
+                        fotogramma_core::tr!(
+                            "{} da elaborare · {} già fatti",
+                            "{} to process · {} already done",
+                            format_bytes(Some(pending_bytes)),
+                            format_int(done)
+                        )
+                    } else {
+                        fotogramma_core::tr!(
+                            "{} da elaborare",
+                            "{} to process",
+                            format_bytes(Some(pending_bytes))
+                        )
+                    },
                     theme::CORAL,
                     width * 2.0,
                 ),
@@ -1016,12 +1062,25 @@ impl FotogrammaApp {
             }
         }
 
-        let insight = if self.summary.to_convert > 0 {
+        let insight = if pending > 0 && done > 0 {
+            fotogramma_core::tr!(
+                "File da convertire: {} · già convertiti: {}. Selezionali nella tabella per convertirli direttamente.",
+                "Files to convert: {} · already converted: {}. Select them in the table to convert them directly.",
+                format_int(pending),
+                format_int(done)
+            )
+        } else if pending > 0 {
             fotogramma_core::tr!(
                 "File da convertire: {}. Selezionali nella tabella per convertirli direttamente.",
                 "Files to convert: {}. Select them in the table to convert them directly.",
-                format_int(self.summary.to_convert)
+                format_int(pending)
             )
+        } else if done > 0 {
+            tr_str(
+                "Tutto convertito. Dove non hai sostituito l’originale, il nuovo file è nella cartella di output.",
+                "Everything is converted. Where you did not replace the original, the new file is in the output folder.",
+            )
+            .to_string()
         } else {
             fotogramma_core::tr!(
                 "Tutti i file sono già compatibili ({}): non serve alcuna conversione.",
@@ -1136,7 +1195,14 @@ impl FotogrammaApp {
         ui.scope(|ui| {
             let height = (ui.available_height() - 26.0).max(120.0);
             ui.allocate_ui(Vec2::new(ui.available_width(), height), |ui| {
-                action = table::show(ui, &self.videos, &visible, &self.selected, &mut self.sort);
+                action = table::show(
+                    ui,
+                    &self.videos,
+                    &visible,
+                    &self.selected,
+                    &self.converted,
+                    &mut self.sort,
+                );
             });
         });
         match action {
@@ -1186,6 +1252,7 @@ impl FotogrammaApp {
             .videos
             .iter()
             .filter(|video| video.category == fotogramma_core::scanner::Category::Convert)
+            .filter(|video| !self.converted.contains_key(&video.path))
             .map(|video| video.path.to_string_lossy().into_owned())
             .collect();
         if convertible.is_empty() {
@@ -1861,5 +1928,121 @@ mod small_snapshot_tests {
             .get_by_label("Seleziona tutti (0)")
             .accesskit_node()
             .is_disabled());
+    }
+
+    fn done(name: &str, replaced: bool) -> crate::worker::ConversionResult {
+        let source = PathBuf::from(format!("/Filmati/{name}"));
+        crate::worker::ConversionResult {
+            destination: if replaced {
+                source.clone()
+            } else {
+                PathBuf::from(format!("/Filmati/Fotogramma-H265/{name}"))
+            },
+            source,
+            success: true,
+            message: String::new(),
+            cancelled: false,
+            verified: replaced,
+            replaced,
+            original_size: Some(573_500_000),
+            new_size: Some(201_000_000),
+        }
+    }
+
+    fn finish_with(app: &mut FotogrammaApp, results: Vec<crate::worker::ConversionResult>) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let plan = ConversionPlan {
+            videos: Vec::new(),
+            profile: fotogramma_core::conversion::profile("balanced").unwrap(),
+            destination_dir: PathBuf::from("/Filmati/Fotogramma-H265"),
+            container: "mkv".to_string(),
+            replace_original: false,
+        };
+        let session = ConversionSession::new(plan, receiver, Arc::new(AtomicBool::new(false)));
+        for result in &results {
+            sender
+                .send(crate::worker::ConversionMessage::FileCompleted(Box::new(
+                    result.clone(),
+                )))
+                .unwrap();
+        }
+        sender
+            .send(crate::worker::ConversionMessage::Completed(results))
+            .unwrap();
+        app.session = Some(session);
+    }
+
+    #[test]
+    fn a_replaced_original_moves_to_the_compatible_videos() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let app = harness.state_mut();
+        app.selected.insert(PathBuf::from("/Filmati/Tramonto.mkv"));
+        let (convert, compatible) = (app.summary.to_convert, app.summary.compatible);
+        finish_with(app, vec![done("Tramonto.mkv", true)]);
+        harness.run();
+        let app = harness.state();
+        assert_eq!(app.summary.to_convert, convert - 1);
+        assert_eq!(app.summary.compatible, compatible + 1);
+        let video = app
+            .videos
+            .iter()
+            .find(|v| v.name == "Tramonto.mkv")
+            .unwrap();
+        assert_eq!(
+            video.category,
+            fotogramma_core::scanner::Category::Compatible
+        );
+        assert_eq!(video.codec.as_deref(), Some("hevc"));
+        assert_eq!(video.size, Some(201_000_000), "the size is the new one");
+        assert!(app.selected.is_empty(), "a finished video is deselected");
+    }
+
+    #[test]
+    fn a_new_file_marks_the_original_as_already_converted() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.filter = FilterCategory::Convert;
+                app
+            });
+        harness.run();
+        let app = harness.state_mut();
+        let convert = app.summary.to_convert;
+        finish_with(app, vec![done("Tramonto.mkv", false)]);
+        harness.run();
+        let app = harness.state();
+        // It stays among the videos to convert (the original is untouched) ...
+        assert_eq!(app.summary.to_convert, convert);
+        assert!(app
+            .converted
+            .contains_key(std::path::Path::new("/Filmati/Tramonto.mkv")));
+        // ... but it says so, and "select all" no longer takes it.
+        harness.get_by_label("Già convertito");
+        harness.get_by_label("Seleziona tutti (1)");
+    }
+
+    #[test]
+    fn everything_converted_is_said_in_the_hint() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let app = harness.state_mut();
+        finish_with(
+            app,
+            vec![done("Tramonto.mkv", false), done("Gita al lago.mp4", false)],
+        );
+        harness.run();
+        let app = harness.state();
+        assert_eq!(app.conversion_progress().0, 0);
+        assert_eq!(app.conversion_progress().1, 2);
     }
 }
