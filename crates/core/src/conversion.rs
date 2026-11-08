@@ -59,6 +59,98 @@ pub const PRESETS: [&str; 9] = [
     "veryslow",
 ];
 
+/// What a video is, as far as the encoder settings go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MediaKind {
+    /// Animation: flat areas and sharp lines, where `-tune animation` helps.
+    Anime,
+    /// Live action (films and series): x265's own defaults are tuned for it.
+    Live,
+}
+
+impl MediaKind {
+    /// The x265 tune for this kind. x265 has no "film" tune, so live action
+    /// uses none.
+    pub fn tune(self) -> Option<&'static str> {
+        match self {
+            MediaKind::Anime => Some("animation"),
+            MediaKind::Live => None,
+        }
+    }
+
+    /// `anime`, `live`, anything else (`auto`) → `None`.
+    pub fn from_setting(value: &str) -> Option<MediaKind> {
+        match value {
+            "anime" => Some(MediaKind::Anime),
+            "live" => Some(MediaKind::Live),
+            _ => None,
+        }
+    }
+}
+
+const ANIME_WORDS: [&str; 6] = [
+    "anime",
+    "animes",
+    "animazione",
+    "animation",
+    "cartoni",
+    "cartoon",
+];
+const LIVE_WORDS: [&str; 13] = [
+    "film",
+    "films",
+    "movie",
+    "movies",
+    "serie",
+    "series",
+    "tv",
+    "telefilm",
+    "show",
+    "shows",
+    "documentari",
+    "documentary",
+    "documentaries",
+];
+
+/// Guess the kind from the folders above a file. Any folder that names anime
+/// makes it anime (so `Anime/Frieren The Movie/` stays anime even though the
+/// title says "movie"); otherwise a folder that names films or series makes it
+/// live action. The file name is ignored: both worlds use `S01E02`.
+pub fn detect_kind(path: &Path) -> Option<MediaKind> {
+    let mut live = false;
+    for folder in path.parent()?.ancestors() {
+        let Some(name) = folder.file_name() else {
+            continue;
+        };
+        let name = name.to_string_lossy().to_lowercase();
+        for token in name
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|token| !token.is_empty())
+        {
+            if ANIME_WORDS.contains(&token) {
+                return Some(MediaKind::Anime);
+            }
+            live |= LIVE_WORDS.contains(&token);
+        }
+    }
+    live.then_some(MediaKind::Live)
+}
+
+/// The kind of a whole selection: the kinds found must agree. Videos with no
+/// hint are ignored; a mixed selection gives `None`.
+pub fn detect_selection<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Option<MediaKind> {
+    let mut found = None;
+    for path in paths {
+        match (found, detect_kind(path)) {
+            (_, None) => {}
+            (None, Some(kind)) => found = Some(kind),
+            (Some(a), Some(b)) if a == b => {}
+            _ => return None,
+        }
+    }
+    found
+}
+
 pub fn builtin_profiles() -> Vec<ConversionProfile> {
     let mut maximum = ConversionProfile::new(
         "max_quality",
@@ -393,5 +485,71 @@ mod tests {
         let args = build_ffmpeg_args(&profile, Path::new("/v/a.mkv"), Path::new("/v/a.h265.mkv"));
         assert!(!args.iter().any(|value| value == "-tune"));
         assert!(!args.iter().any(|value| value == "-x265-params"));
+    }
+
+    #[test]
+    fn x265_has_no_film_tune() {
+        assert_eq!(MediaKind::Anime.tune(), Some("animation"));
+        assert_eq!(MediaKind::Live.tune(), None);
+    }
+
+    #[test]
+    fn the_kind_comes_from_the_folders() {
+        let kind = |path: &str| detect_kind(Path::new(path));
+        assert_eq!(
+            kind("/Media/Anime/Frieren/S01E01.mkv"),
+            Some(MediaKind::Anime)
+        );
+        assert_eq!(
+            kind("/Media/Serie TV/Dark/S01E01.mkv"),
+            Some(MediaKind::Live)
+        );
+        assert_eq!(
+            kind("/Media/serie-tv/Dark/S01E01.mkv"),
+            Some(MediaKind::Live)
+        );
+        assert_eq!(
+            kind("/Media/Movies/Heat (1995)/Heat.mkv"),
+            Some(MediaKind::Live)
+        );
+        assert_eq!(kind("/Media/Film/Alien.mkv"), Some(MediaKind::Live));
+        assert_eq!(kind("/Media/Animazione/Coco.mkv"), Some(MediaKind::Anime));
+        assert_eq!(kind("/Media/Misc/clip.mkv"), None);
+        assert_eq!(kind("clip.mkv"), None);
+    }
+
+    #[test]
+    fn anime_anywhere_in_the_path_wins_and_the_file_name_is_ignored() {
+        let kind = |path: &str| detect_kind(Path::new(path));
+        assert_eq!(
+            kind("/Film/Anime/Spirited Away.mkv"),
+            Some(MediaKind::Anime)
+        );
+        assert_eq!(kind("/Anime/Film/Your Name.mkv"), Some(MediaKind::Anime));
+        assert_eq!(
+            kind("/Anime/Frieren The Movie/a.mkv"),
+            Some(MediaKind::Anime)
+        );
+        assert_eq!(kind("/Media/Anime Movies/x.mkv"), Some(MediaKind::Anime));
+        assert_eq!(kind("/Media/Misc/Anime Movie.mkv"), None);
+        assert_eq!(kind("/Filmati/clip.mkv"), None, "a word must match whole");
+    }
+
+    #[test]
+    fn a_selection_needs_agreeing_hints() {
+        let anime = Path::new("/Anime/a.mkv");
+        let live = Path::new("/Film/b.mkv");
+        let none = Path::new("/Misc/c.mkv");
+        assert_eq!(detect_selection([anime, none]), Some(MediaKind::Anime));
+        assert_eq!(detect_selection([anime, anime]), Some(MediaKind::Anime));
+        assert_eq!(detect_selection([anime, live]), None);
+        assert_eq!(detect_selection([none]), None);
+    }
+
+    #[test]
+    fn settings_map_to_kinds() {
+        assert_eq!(MediaKind::from_setting("anime"), Some(MediaKind::Anime));
+        assert_eq!(MediaKind::from_setting("live"), Some(MediaKind::Live));
+        assert_eq!(MediaKind::from_setting("auto"), None);
     }
 }

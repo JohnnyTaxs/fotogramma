@@ -39,6 +39,13 @@ pub struct Settings {
     /// Conversion profile key pre-selected in the conversion dialog.
     #[serde(default = "default_profile")]
     pub default_profile: String,
+    /// Content type for the encoder: `auto` (read the path), `anime` or `live`.
+    #[serde(default = "default_content_type")]
+    pub content_type: String,
+    /// Folder for converted files; empty means a `Fotogramma-H265` folder
+    /// next to the originals.
+    #[serde(default)]
+    pub output_dir: String,
     /// Output container for new files: `mkv` or `mp4`.
     #[serde(default = "default_container")]
     pub default_container: String,
@@ -60,6 +67,10 @@ fn default_profile() -> String {
     "balanced".to_string()
 }
 
+fn default_content_type() -> String {
+    "auto".to_string()
+}
+
 fn default_container() -> String {
     "mkv".to_string()
 }
@@ -76,6 +87,8 @@ impl Default for Settings {
             accepted_codecs: default_accepted_codecs(),
             replace_original: false,
             default_profile: default_profile(),
+            content_type: default_content_type(),
+            output_dir: String::new(),
             default_container: default_container(),
         }
     }
@@ -147,6 +160,8 @@ mod tests {
             accepted_codecs: vec!["h264".to_string()],
             replace_original: true,
             default_profile: "fast".to_string(),
+            content_type: "anime".to_string(),
+            output_dir: "/Volumes/Out".to_string(),
             default_container: "mp4".to_string(),
         };
         let text = toml::to_string_pretty(&settings).unwrap();
@@ -156,6 +171,8 @@ mod tests {
         assert_eq!(parsed.accepted_codecs, vec!["h264".to_string()]);
         assert!(parsed.replace_original);
         assert_eq!(parsed.default_container, "mp4");
+        assert_eq!(parsed.content_type, "anime");
+        assert_eq!(parsed.output_dir, "/Volumes/Out");
         assert_eq!(parsed.language, "en");
         assert!(!parsed.check_updates);
         assert_eq!(parsed.skipped_update, "v9.9.9");
@@ -170,6 +187,8 @@ mod tests {
         assert!(!parsed.replace_original);
         assert_eq!(parsed.default_profile, "balanced");
         assert_eq!(parsed.default_container, "mkv");
+        assert_eq!(parsed.content_type, "auto");
+        assert!(parsed.output_dir.is_empty());
         assert_eq!(parsed.language, "auto");
         assert!(parsed.check_updates);
         assert!(parsed.skipped_update.is_empty());

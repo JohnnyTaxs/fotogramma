@@ -19,6 +19,7 @@ It is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no brows
 - Statistics, filters, search, sortable columns, and multi-file selection.
 - **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
 - Full-output validation before replacing an original file.
+- **Content type:** anime or live action (films and series). Anime gets `-tune animation`; "Automatic" reads the folders of the path (`Anime`, `Film`, `Serie TV`, `Movies`…), in English and Italian.
 - **Self-update:** the app checks GitHub at startup, shows the release notes, and installs the new version after verifying its checksum. It can be switched off.
 - **English and Italian**, chosen automatically from the system language, with an optional manual override.
 - **Settings** window: choose which codecs count as already compatible (the home page, statistics, and table update at once, no new scan) and the conversion defaults (replace original, profile, container).
@@ -47,6 +48,8 @@ Open **Settings** (*Impostazioni* in Italian) from the header. Changes apply imm
 
 - **Language:** automatic (follows the system), Italian, or English.
 - **Accepted codecs:** H.265, AV1, H.264, VP9. Files with an accepted codec count as already compatible. Unreadable files always stay errors, and a conversion is always verified as HEVC.
+- **Content type:** automatic (from the path), anime, or films and series, used as the default in the conversion dialog.
+- **Default output folder:** where converted files go. Empty means a `Fotogramma-H265` folder next to the originals.
 - **Replace the original by default:** pre-selects the verified replacement in the conversion dialog.
 - **Profile and container:** the preset and `mkv`/`mp4` pre-selected for new conversions.
 
@@ -59,7 +62,19 @@ Open **Settings** (*Impostazioni* in Italian) from the header. Changes apply imm
 | Maximum quality and compression | Best quality/size ratio, even if slow | CRF 20, `veryslow`, AQ mode 3, 10-bit | Original |
 | Intermediate · good quality | Balanced quality, size, and speed | CRF 22, `medium`, 10-bit | Original |
 | Fast · quick transcode | Maximum transcoding speed | CRF 26, `ultrafast`, 8-bit | Original |
-| Custom | Manual control | CRF, preset, pixel format, tune, AQ mode | Original or AAC |
+| Custom | Manual control | CRF, preset, pixel format, tune (none, animation, grain), AQ mode | Original or AAC |
+
+### Content type
+
+Besides the quality preset, the conversion dialog has a **Content type** menu:
+
+| Choice | Encoder effect |
+| --- | --- |
+| Automatic (from the path) | Anime if any folder of the path says so, films and series if one says that, otherwise standard settings. The dialog shows what it detected. |
+| Anime / animation | `-tune animation`: flat areas and sharp lines are kept without wasting bits. |
+| Films and TV series | No tune: x265's own defaults are already made for live action. (x265 has no `film` tune.) |
+
+The words it looks for in folder names are `anime`, `animazione`, `animation`, `cartoni`, `cartoon` for anime and `film`, `movie(s)`, `serie`, `series`, `tv`, `telefilm`, `show(s)`, `documentari`, `documentary` for live action. Anime wins when both appear, so `Anime/Film/` and `Anime/Frieren The Movie/` stay anime. Only whole words count (`Filmati` does not match) and the file name is ignored. With a mixed selection nothing is guessed. The audio choice (original or AAC 128/160/256 kbps) applies to every preset.
 
 All streams are mapped with `-map 0`, preserving audio tracks, subtitles, chapters, and compatible metadata. Audio can be kept unchanged or encoded as **AAC 128/160/256 kbps**. MKV is recommended for stream compatibility; MP4 enables `+faststart`.
 

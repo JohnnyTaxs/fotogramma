@@ -26,7 +26,7 @@ eframe + egui (glow / OpenGL)
 
 ## Workspace
 
-`Cargo.toml` defines a two-crate workspace, version `2.4.0`:
+`Cargo.toml` defines a two-crate workspace, version `2.5.0`:
 
 | Crate | Responsibility |
 | --- | --- |
@@ -76,6 +76,10 @@ Italian and English. `Lang` resolves the setting (`auto`, `it`, `en`) against th
 Self-update, the only code that touches the network. `check` reads the latest GitHub release and `pick_release` chooses this platform's archive (`Fotogramma-<System>-<arch>.zip`), accepting only assets under this repository's download URL. `download` streams the archive while hashing it and refuses it unless the SHA-256 equals the entry in `SHA256SUMS.txt`. `stage` unpacks it next to the installed copy (`ditto` on macOS, the zip crate elsewhere) so the final move is a rename, and on macOS checks the code signature. `spawn_swap` starts a detached helper (`sh` on macOS and Linux, `cmd` on Windows) that waits for the app to exit, renames the old copy aside, moves the new one in, restores the old one if that fails, and relaunches. `InstallTarget::detect` is `None` for a development binary, which is never replaced.
 
 The window in `dialogs.rs` shows the release notes, then *Update and restart*, *Later* or *Skip this version* (stored in `settings.toml`). The restart is held back while a scan or conversion runs.
+
+### Content type (in `conversion.rs`)
+
+`MediaKind` is `Anime` or `Live`. `detect_kind(path)` tokenizes the folder names above a file (lowercase, split on non-alphanumerics) and returns `Anime` if any token is an anime word, else `Live` if any is a film/series word; `detect_selection` requires the files of a selection to agree. The dialog (`ConversionDialog::effective_kind`) combines the setting (`auto`, `anime`, `live`) with the detection and applies only the x265 tune: `animation` for anime, none for live action. The audio choice is merged into built-in profiles in `current_profile`, so every preset honours it.
 
 ### `crates/core/src/verification.rs`
 

@@ -3,7 +3,8 @@
 use eframe::egui::{self, RichText};
 use fotogramma_core::conversion::{
     allocate_output_path, allocate_partial_path, build_ffmpeg_args, builtin_profiles,
-    custom_profile, profile as builtin_profile, AudioMode, ConversionProfile, PRESETS,
+    custom_profile, detect_selection, profile as builtin_profile, AudioMode, ConversionProfile,
+    MediaKind, PRESETS,
 };
 use fotogramma_core::formatting::{codec_label, format_bytes, format_duration};
 use fotogramma_core::scanner::VideoInfo;
@@ -40,6 +41,10 @@ pub struct ConversionDialog {
     pub preset: String,
     pub pixel: String,
     pub tune: String,
+    /// `auto`, `anime` or `live`.
+    pub content: String,
+    /// What the paths of the selection suggest.
+    pub detected: Option<MediaKind>,
     pub aq: Option<u8>,
     pub audio_index: usize,
     pub container: String,
@@ -63,11 +68,16 @@ pub enum DialogOutcome {
 
 impl ConversionDialog {
     pub fn new(videos: Vec<VideoInfo>, defaults: &Settings) -> Self {
-        let destination = videos
-            .first()
-            .and_then(|video| video.path.parent())
-            .map(|parent| parent.join("Fotogramma-H265"))
-            .unwrap_or_else(|| PathBuf::from("Fotogramma-H265"));
+        let destination = if defaults.output_dir.trim().is_empty() {
+            videos
+                .first()
+                .and_then(|video| video.path.parent())
+                .map(|parent| parent.join("Fotogramma-H265"))
+                .unwrap_or_else(|| PathBuf::from("Fotogramma-H265"))
+        } else {
+            PathBuf::from(defaults.output_dir.trim())
+        };
+        let detected = detect_selection(videos.iter().map(|video| video.path.as_path()));
         let balanced = builtin_profile("balanced").expect("balanced profile");
         let mut dialog = Self {
             videos,
@@ -76,6 +86,8 @@ impl ConversionDialog {
             preset: balanced.preset,
             pixel: balanced.pixel_format,
             tune: String::new(),
+            content: defaults.content_type.clone(),
+            detected,
             aq: balanced.aq_mode,
             audio_index: 0,
             container: if defaults.default_container == "mp4" {
@@ -91,9 +103,25 @@ impl ConversionDialog {
             && builtin_profile(&defaults.default_profile).is_some()
         {
             dialog.profile_key = defaults.default_profile.clone();
-            dialog.apply_profile();
         }
+        dialog.apply_profile();
         dialog
+    }
+
+    /// The kind the encoder settings follow: the user's choice, or what the
+    /// paths suggest when the choice is "auto".
+    pub fn effective_kind(&self) -> Option<MediaKind> {
+        MediaKind::from_setting(&self.content).or(if self.content == "auto" {
+            self.detected
+        } else {
+            None
+        })
+    }
+
+    fn kind_tune(&self) -> Option<String> {
+        self.effective_kind()
+            .and_then(MediaKind::tune)
+            .map(str::to_string)
     }
 
     fn apply_profile(&mut self) {
@@ -101,18 +129,26 @@ impl ConversionDialog {
             self.crf = profile.crf;
             self.preset = profile.preset;
             self.pixel = profile.pixel_format;
-            self.tune = profile.tune.unwrap_or_default();
             self.aq = profile.aq_mode;
         }
+        self.tune = self.kind_tune().unwrap_or_default();
     }
 
     pub fn current_profile(&self) -> ConversionProfile {
+        let audio = audio_options()[self.audio_index.min(audio_options().len() - 1)];
+        let (audio_mode, audio_bitrate) = if audio.1.is_some() {
+            (AudioMode::Aac, audio.1.unwrap_or(160))
+        } else {
+            (AudioMode::Copy, 160)
+        };
         if self.profile_key != "custom" {
-            if let Some(profile) = builtin_profile(&self.profile_key) {
+            if let Some(mut profile) = builtin_profile(&self.profile_key) {
+                profile.tune = self.kind_tune();
+                profile.audio_mode = audio_mode;
+                profile.audio_bitrate = audio_bitrate;
                 return profile;
             }
         }
-        let audio = audio_options()[self.audio_index.min(audio_options().len() - 1)];
         custom_profile(
             self.crf,
             &self.preset,
@@ -256,6 +292,27 @@ impl ConversionDialog {
                     .labelled_by(profile_label.id);
                 ui.end_row();
 
+                let content_label = ui.label(tr_str("Tipo di contenuto", "Content type"));
+                let before = self.content.clone();
+                egui::ComboBox::from_id_salt("content-combo")
+                    .width(360.0)
+                    .selected_text(content_name(&self.content))
+                    .show_ui(ui, |ui| {
+                        for value in ["auto", "anime", "live"] {
+                            ui.selectable_value(
+                                &mut self.content,
+                                value.to_string(),
+                                content_name(value),
+                            );
+                        }
+                    })
+                    .response
+                    .labelled_by(content_label.id);
+                if self.content != before {
+                    self.tune = self.kind_tune().unwrap_or_default();
+                }
+                ui.end_row();
+
                 let crf_label = ui.label(tr_str("CRF · qualità", "CRF · quality"));
                 ui.add_enabled_ui(custom, |ui| {
                     ui.horizontal(|ui| {
@@ -328,7 +385,6 @@ impl ConversionDialog {
                                 "animation".to_string(),
                                 "Animation",
                             );
-                            ui.selectable_value(&mut self.tune, "film".to_string(), "Film");
                             ui.selectable_value(&mut self.tune, "grain".to_string(), "Grain");
                         })
                         .response
@@ -412,6 +468,21 @@ impl ConversionDialog {
                 .unwrap_or_default()
         };
         ui.label(RichText::new(description).small().color(theme::MUTED));
+        if self.content == "auto" {
+            let text = match self.detected {
+                Some(kind) => fotogramma_core::tr!(
+                    "Rilevato dal percorso: {}.",
+                    "Detected from the path: {}.",
+                    kind_name(kind)
+                ),
+                None => tr_str(
+                    "Nessun indizio nel percorso: impostazioni standard.",
+                    "No hint in the path: standard settings.",
+                )
+                .to_string(),
+            };
+            ui.label(RichText::new(text).small().color(theme::MUTED));
+        }
         ui.add_space(4.0);
 
         ui.group(|ui| {
@@ -598,10 +669,24 @@ fn pixel_label(pixel: &str) -> &'static str {
     }
 }
 
+fn content_name(value: &str) -> &'static str {
+    match value {
+        "anime" => tr_str("Anime / animazione", "Anime / animation"),
+        "live" => tr_str("Film e serie TV", "Films and TV series"),
+        _ => tr_str("Automatico (dal percorso)", "Automatic (from the path)"),
+    }
+}
+
+fn kind_name(kind: MediaKind) -> &'static str {
+    match kind {
+        MediaKind::Anime => tr_str("anime", "anime"),
+        MediaKind::Live => tr_str("film e serie TV", "films and TV series"),
+    }
+}
+
 fn tune_label(tune: &str) -> &'static str {
     match tune {
         "animation" => "Animation",
-        "film" => "Film",
         "grain" => "Grain",
         _ => tr_str("Nessuno", "None"),
     }
@@ -1014,7 +1099,14 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
     let mut changed = false;
     let mut check_now = false;
     let mut closed = false;
-    let modal = egui::Modal::new(egui::Id::unique("settings-dialog"))
+    let screen_height = ctx.content_rect().height();
+    let modal_id = egui::Id::unique("settings-dialog");
+    let modal_area = egui::Modal::default_area(modal_id).default_size(egui::vec2(
+        560.0,
+        (screen_height - 90.0).clamp(480.0, 800.0),
+    ));
+    let modal = egui::Modal::new(modal_id)
+        .area(modal_area)
         .frame(modal_frame())
         .show(ctx, |ui| {
             ui.set_min_width(520.0);
@@ -1034,7 +1126,7 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
             );
             ui.add_space(8.0);
 
-            let max_height = (ctx.content_rect().height() - 190.0).max(240.0);
+            let max_height = (screen_height - 150.0).max(240.0);
             egui::ScrollArea::vertical()
                 .max_height(max_height)
                 .auto_shrink([false, true])
@@ -1074,16 +1166,18 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
                 .small()
                 .color(theme::MUTED),
             );
-            for (key, label) in KNOWN_CODECS {
-                let mut accepted = settings.accepted_codecs.iter().any(|value| value == key);
-                if ui.checkbox(&mut accepted, label).changed() {
-                    settings.accepted_codecs.retain(|value| value != key);
-                    if accepted {
-                        settings.accepted_codecs.push(key.to_string());
+            ui.horizontal_wrapped(|ui| {
+                for (key, label) in KNOWN_CODECS {
+                    let mut accepted = settings.accepted_codecs.iter().any(|value| value == key);
+                    if ui.checkbox(&mut accepted, label).changed() {
+                        settings.accepted_codecs.retain(|value| value != key);
+                        if accepted {
+                            settings.accepted_codecs.push(key.to_string());
+                        }
+                        changed = true;
                     }
-                    changed = true;
                 }
-            }
+            });
             ui.add_space(8.0);
 
             ui.label(RichText::new(tr_str("Conversione", "Conversion")).strong());
@@ -1162,7 +1256,68 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
                         .response
                         .labelled_by(container_label_widget.id);
                     ui.end_row();
+
+                    let content_widget = ui.label(tr_str("Tipo di contenuto", "Content type"));
+                    egui::ComboBox::from_id_salt("settings-content")
+                        .width(320.0)
+                        .selected_text(content_name(&settings.content_type))
+                        .show_ui(ui, |ui| {
+                            for value in ["auto", "anime", "live"] {
+                                if ui
+                                    .selectable_value(
+                                        &mut settings.content_type,
+                                        value.to_string(),
+                                        content_name(value),
+                                    )
+                                    .changed()
+                                {
+                                    changed = true;
+                                }
+                            }
+                        })
+                        .response
+                        .labelled_by(content_widget.id);
+                    ui.end_row();
                 });
+
+            ui.add_space(4.0);
+            let output_label = ui.label(tr_str(
+                "Cartella di output predefinita",
+                "Default output folder",
+            ));
+            ui.horizontal(|ui| {
+                let edit = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut settings.output_dir)
+                            .hint_text(tr_str(
+                                "Vuoto: cartella Fotogramma-H265 accanto agli originali",
+                                "Empty: a Fotogramma-H265 folder next to the originals",
+                            ))
+                            .desired_width(300.0),
+                    )
+                    .labelled_by(output_label.id);
+                if edit.changed() {
+                    changed = true;
+                }
+                if ui
+                    .add(theme::secondary_button(tr_str("Scegli…", "Choose…")))
+                    .clicked()
+                {
+                    let start = if settings.output_dir.trim().is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(settings.output_dir.trim()))
+                    };
+                    let mut dialog = rfd::FileDialog::new();
+                    if let Some(start) = start {
+                        dialog = dialog.set_directory(start);
+                    }
+                    if let Some(folder) = dialog.pick_folder() {
+                        settings.output_dir = folder.to_string_lossy().into_owned();
+                        changed = true;
+                    }
+                }
+            });
 
             ui.add_space(8.0);
             ui.label(RichText::new(tr_str("Aggiornamenti", "Updates")).strong());
@@ -1453,4 +1608,106 @@ pub fn show_update(ctx: &egui::Context, dialog: &mut UpdateDialog, busy: bool) -
         action = UpdateAction::Later;
     }
     action
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fotogramma_core::conversion::build_ffmpeg_args;
+    use fotogramma_core::scanner::Category;
+
+    fn video(path: &str) -> VideoInfo {
+        VideoInfo {
+            path: PathBuf::from(path),
+            relative_path: "a.mkv".into(),
+            name: "a.mkv".into(),
+            folder: String::new(),
+            extension: "mkv".into(),
+            category: Category::Convert,
+            codec: Some("h264".into()),
+            size: Some(1),
+            duration: Some(10.0),
+            width: Some(1920),
+            height: Some(1080),
+            error: None,
+        }
+    }
+
+    fn arguments(dialog: &ConversionDialog) -> Vec<String> {
+        build_ffmpeg_args(
+            &dialog.current_profile(),
+            Path::new("/in/a.mkv"),
+            Path::new("/out/a.h265.mkv"),
+        )
+    }
+
+    fn has(args: &[String], pair: [&str; 2]) -> bool {
+        args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1])
+    }
+
+    #[test]
+    fn an_anime_folder_selects_the_animation_tune() {
+        let dialog =
+            ConversionDialog::new(vec![video("/Media/Anime/Show/a.mkv")], &Settings::default());
+        assert_eq!(dialog.effective_kind(), Some(MediaKind::Anime));
+        assert!(has(&arguments(&dialog), ["-tune", "animation"]));
+    }
+
+    #[test]
+    fn live_action_and_unknown_paths_use_no_tune() {
+        for path in ["/Media/Film/a.mkv", "/Media/Misc/a.mkv"] {
+            let dialog = ConversionDialog::new(vec![video(path)], &Settings::default());
+            assert!(
+                !arguments(&dialog).iter().any(|value| value == "-tune"),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_user_choice_beats_the_path() {
+        let mut settings = Settings {
+            content_type: "live".to_string(),
+            ..Settings::default()
+        };
+        let dialog = ConversionDialog::new(vec![video("/Media/Anime/a.mkv")], &settings);
+        assert_eq!(dialog.effective_kind(), Some(MediaKind::Live));
+        assert!(!arguments(&dialog).iter().any(|value| value == "-tune"));
+        settings.content_type = "anime".to_string();
+        let dialog = ConversionDialog::new(vec![video("/Media/Film/a.mkv")], &settings);
+        assert!(has(&arguments(&dialog), ["-tune", "animation"]));
+    }
+
+    #[test]
+    fn x265_never_receives_the_film_tune() {
+        for content in ["auto", "anime", "live"] {
+            let settings = Settings {
+                content_type: content.to_string(),
+                ..Settings::default()
+            };
+            for path in ["/Media/Anime/a.mkv", "/Media/Film/a.mkv", "/x/a.mkv"] {
+                let dialog = ConversionDialog::new(vec![video(path)], &settings);
+                assert!(!has(&arguments(&dialog), ["-tune", "film"]));
+            }
+        }
+    }
+
+    #[test]
+    fn the_default_output_folder_is_used_when_set() {
+        let mut settings = Settings::default();
+        let next_to_source = ConversionDialog::new(vec![video("/Media/a.mkv")], &settings);
+        assert_eq!(next_to_source.destination, "/Media/Fotogramma-H265");
+        settings.output_dir = "  /Volumes/Out  ".to_string();
+        let custom = ConversionDialog::new(vec![video("/Media/a.mkv")], &settings);
+        assert_eq!(custom.destination, "/Volumes/Out");
+    }
+
+    #[test]
+    fn the_audio_choice_applies_to_the_built_in_profiles() {
+        let mut dialog = ConversionDialog::new(vec![video("/Media/a.mkv")], &Settings::default());
+        dialog.audio_index = 2;
+        let args = arguments(&dialog);
+        assert!(has(&args, ["-c:a", "aac"]));
+        assert!(has(&args, ["-b:a", "160k"]));
+    }
 }
