@@ -50,7 +50,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Run tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: Verify the packaged media toolchain
         env:
@@ -113,7 +113,7 @@ jobs:
         run: deployment/ffmpeg/build_minimal.sh
 
       - name: Run tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: Verify the packaged media toolchain
         env:
@@ -197,7 +197,7 @@ jobs:
         run: deployment/ffmpeg/build_minimal_windows.sh
 
       - name: Run tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: Build portable app
         run: python deployment/build_rust.py

@@ -1752,10 +1752,17 @@ mod tests {
     fn the_default_output_folder_is_used_when_set() {
         let mut settings = Settings::default();
         let next_to_source = ConversionDialog::new(vec![video("/Media/a.mkv")], &settings);
-        assert_eq!(next_to_source.destination, "/Media/Fotogramma-H265");
+        // Compare paths, not strings: Windows joins with a backslash.
+        assert_eq!(
+            PathBuf::from(&next_to_source.destination),
+            PathBuf::from("/Media").join("Fotogramma-H265")
+        );
         settings.output_dir = "  /Volumes/Out  ".to_string();
         let custom = ConversionDialog::new(vec![video("/Media/a.mkv")], &settings);
-        assert_eq!(custom.destination, "/Volumes/Out");
+        assert_eq!(
+            PathBuf::from(&custom.destination),
+            PathBuf::from("/Volumes/Out")
+        );
     }
 
     #[test]
