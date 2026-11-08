@@ -1,3 +1,6 @@
+// A graphical app: without this Windows opens a console window behind it.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod app;
 mod dialogs;
 mod icon;
