@@ -54,6 +54,19 @@ pub fn format_duration(value: Option<f64>) -> String {
     }
 }
 
+/// A rough time left: `45 s`, `12 min`, `1 h 05 min`.
+pub fn format_eta(seconds: u64) -> String {
+    if seconds < 60 {
+        return format!("{seconds} s");
+    }
+    let minutes = seconds.div_ceil(60);
+    if minutes < 60 {
+        format!("{minutes} min")
+    } else {
+        format!("{} h {:02} min", minutes / 60, minutes % 60)
+    }
+}
+
 /// How much room a conversion freed (or took) in total.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SpaceChange {
@@ -156,6 +169,19 @@ mod tests {
             after: 5
         }
         .is_saving());
+    }
+
+    #[test]
+    fn eta_reads_naturally() {
+        assert_eq!(format_eta(0), "0 s");
+        assert_eq!(format_eta(45), "45 s");
+        assert_eq!(format_eta(61), "2 min");
+        assert_eq!(format_eta(3599), "1 h 00 min");
+        assert_eq!(format_eta(3541), "1 h 00 min");
+        assert_eq!(format_eta(3540), "59 min");
+        assert_eq!(format_eta(3600), "1 h 00 min");
+        assert_eq!(format_eta(3725), "1 h 03 min");
+        assert_eq!(format_eta(7199), "2 h 00 min");
     }
 
     #[test]

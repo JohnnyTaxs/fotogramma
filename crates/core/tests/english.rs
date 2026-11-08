@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 fn video(category: Category) -> VideoInfo {
     VideoInfo {
+        hdr: false,
         path: PathBuf::from("/v/a.mkv"),
         relative_path: "a.mkv".into(),
         name: "a.mkv".into(),

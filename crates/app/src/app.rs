@@ -569,6 +569,7 @@ impl FotogrammaApp {
             plan.destination_dir.clone(),
             plan.container.clone(),
             plan.replace_original,
+            plan.options,
             cancel.clone(),
             ctx.clone(),
         );
@@ -1614,6 +1615,7 @@ mod snapshot_tests {
         error: Option<&str>,
     ) -> VideoInfo {
         VideoInfo {
+            hdr: false,
             path: PathBuf::from(format!("/Filmati/{name}")),
             relative_path: name.to_string(),
             name: name.to_string(),
@@ -1946,6 +1948,7 @@ mod small_snapshot_tests {
             replaced,
             original_size: Some(573_500_000),
             new_size: Some(201_000_000),
+            skipped: false,
         }
     }
 
@@ -1957,6 +1960,7 @@ mod small_snapshot_tests {
             destination_dir: PathBuf::from("/Filmati/Fotogramma-H265"),
             container: "mkv".to_string(),
             replace_original: false,
+            options: crate::worker::ConversionOptions::default(),
         };
         let session = ConversionSession::new(plan, receiver, Arc::new(AtomicBool::new(false)));
         for result in &results {

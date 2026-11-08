@@ -88,6 +88,13 @@ pub struct VideoInfo {
     pub height: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// HDR10 or HLG: a 10-bit pipeline is needed to keep it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hdr: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl VideoInfo {
@@ -271,6 +278,7 @@ fn extension_of(path: &Path) -> String {
 fn error_video(path: &Path, root: &Path, message: String, size: Option<u64>) -> VideoInfo {
     let relative = relative_path(path, root);
     VideoInfo {
+        hdr: false,
         path: absolute(path),
         relative_path: relative.clone(),
         name: file_name(path),
@@ -315,7 +323,7 @@ pub fn probe_video(
         .arg("-select_streams")
         .arg("v:0")
         .arg("-show_entries")
-        .arg("stream=codec_name,width,height:format=duration,size")
+        .arg("stream=codec_name,width,height,color_transfer:format=duration,size")
         .arg("-of")
         .arg("json")
         .arg(file_path)
@@ -447,7 +455,15 @@ pub fn probe_video(
         Category::Convert
     };
 
+    let hdr = matches!(
+        stream
+            .get("color_transfer")
+            .and_then(|value| value.as_str()),
+        Some("smpte2084") | Some("arib-std-b67")
+    );
+
     Ok(VideoInfo {
+        hdr,
         path: absolute(file_path),
         relative_path: relative.clone(),
         name: file_name(file_path),
@@ -602,6 +618,7 @@ mod tests {
     #[test]
     fn reclassify_follows_the_accepted_codecs() {
         let video = |codec: &str, category| VideoInfo {
+            hdr: false,
             path: PathBuf::from(format!("/v/{codec}.mkv")),
             relative_path: format!("{codec}.mkv"),
             name: format!("{codec}.mkv"),
@@ -646,6 +663,7 @@ mod tests {
     #[test]
     fn summarizes_categories_and_bytes() {
         let base = VideoInfo {
+            hdr: false,
             path: PathBuf::from("/videos/a.mp4"),
             relative_path: "a.mp4".into(),
             name: "a.mp4".into(),

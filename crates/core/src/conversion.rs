@@ -151,6 +151,28 @@ pub fn detect_selection<'a>(paths: impl IntoIterator<Item = &'a Path>) -> Option
     found
 }
 
+/// MP4 holds only `mov_text` subtitles. Text subtitles from an MKV (SRT, ASS)
+/// and graphic ones (PGS, DVD) make `ffmpeg` write nothing, so a file that
+/// has any of them goes into MKV even when MP4 was asked for.
+pub fn container_for<'a>(requested: &'a str, subtitle_codecs: &[String]) -> &'a str {
+    if requested == "mp4" && subtitle_codecs.iter().any(|codec| codec != "mov_text") {
+        "mkv"
+    } else {
+        requested
+    }
+}
+
+/// HDR needs more than 8 bits, so an 8-bit preset is raised to 10 bits for an
+/// HDR source: the HDR tags and mastering data are kept by FFmpeg, but not
+/// meaningfully in 8 bits.
+pub fn profile_for_video(profile: &ConversionProfile, hdr: bool) -> ConversionProfile {
+    let mut profile = profile.clone();
+    if hdr && profile.pixel_format == "yuv420p" {
+        profile.pixel_format = "yuv420p10le".to_string();
+    }
+    profile
+}
+
 pub fn builtin_profiles() -> Vec<ConversionProfile> {
     let mut maximum = ConversionProfile::new(
         "max_quality",
@@ -551,5 +573,28 @@ mod tests {
         assert_eq!(MediaKind::from_setting("anime"), Some(MediaKind::Anime));
         assert_eq!(MediaKind::from_setting("live"), Some(MediaKind::Live));
         assert_eq!(MediaKind::from_setting("auto"), None);
+    }
+
+    #[test]
+    fn mp4_is_kept_only_when_it_can_hold_the_subtitles() {
+        let codecs = |list: &[&str]| list.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+        assert_eq!(container_for("mp4", &[]), "mp4");
+        assert_eq!(container_for("mp4", &codecs(&["mov_text"])), "mp4");
+        assert_eq!(container_for("mp4", &codecs(&["subrip"])), "mkv");
+        assert_eq!(
+            container_for("mp4", &codecs(&["mov_text", "hdmv_pgs_subtitle"])),
+            "mkv"
+        );
+        assert_eq!(container_for("mkv", &codecs(&["subrip"])), "mkv");
+    }
+
+    #[test]
+    fn hdr_sources_never_get_an_8_bit_pipeline() {
+        let fast = profile("fast").unwrap();
+        assert_eq!(fast.pixel_format, "yuv420p");
+        assert_eq!(profile_for_video(&fast, true).pixel_format, "yuv420p10le");
+        assert_eq!(profile_for_video(&fast, false).pixel_format, "yuv420p");
+        let balanced = profile("balanced").unwrap();
+        assert_eq!(profile_for_video(&balanced, true), balanced);
     }
 }

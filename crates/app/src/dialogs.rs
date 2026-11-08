@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use crate::settings::{Settings, KNOWN_CODECS};
 use crate::theme;
-use crate::worker::{ConversionMessage, ConversionResult, InstallMessage};
+use crate::worker::{ConversionMessage, ConversionOptions, ConversionResult, InstallMessage};
 use fotogramma_core::i18n::tr_str;
 use fotogramma_core::update::{InstallTarget, Release};
 
@@ -50,6 +50,7 @@ pub struct ConversionDialog {
     pub container: String,
     pub destination: String,
     pub replace_original: bool,
+    pub options: ConversionOptions,
 }
 
 pub struct ConversionPlan {
@@ -58,6 +59,7 @@ pub struct ConversionPlan {
     pub destination_dir: PathBuf,
     pub container: String,
     pub replace_original: bool,
+    pub options: ConversionOptions,
 }
 
 pub enum DialogOutcome {
@@ -97,6 +99,10 @@ impl ConversionDialog {
             },
             destination: destination.to_string_lossy().into_owned(),
             replace_original: defaults.replace_original,
+            options: ConversionOptions {
+                min_saving_percent: defaults.min_saving_percent,
+                prevent_sleep: defaults.prevent_sleep,
+            },
         };
         // A saved profile that no longer exists falls back to "balanced".
         if defaults.default_profile != "custom"
@@ -209,6 +215,7 @@ impl ConversionDialog {
             destination_dir,
             container,
             replace_original: self.replace_original,
+            options: self.options,
         })
     }
 
@@ -451,6 +458,23 @@ impl ConversionDialog {
                         })
                         .response
                         .labelled_by(container_field.id);
+                });
+                ui.end_row();
+
+                let saving_label = ui.label(tr_str("Soglia di risparmio", "Minimum saving"));
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::Slider::new(&mut self.options.min_saving_percent, 0..=50)
+                            .step_by(5.0)
+                            .custom_formatter(|value, _| {
+                                if value == 0.0 {
+                                    tr_str("nessuna", "none").to_string()
+                                } else {
+                                    format!("{value}%")
+                                }
+                            }),
+                    )
+                    .labelled_by(saving_label.id);
                 });
                 ui.end_row();
             });
@@ -744,6 +768,15 @@ pub struct ConversionSession {
 }
 
 /// `, 1,2 GB instead of 2,0 GB (-40%)` for one converted file.
+/// ` · subtitles do not fit MP4: saved as MKV` and the like.
+fn message_note(result: &ConversionResult) -> String {
+    if result.message.is_empty() {
+        String::new()
+    } else {
+        format!(" · {}", result.message)
+    }
+}
+
 fn size_note(result: &ConversionResult) -> String {
     let (Some(before), Some(after)) = (result.original_size, result.new_size) else {
         return String::new();
@@ -808,15 +841,21 @@ impl ConversionSession {
                     total,
                     percent,
                     current_file,
+                    eta,
                 } => {
                     self.percent = percent;
-                    self.label = format!(
-                        "{index} / {total} · {} · {percent}%",
-                        current_file
-                            .file_name()
-                            .map(|value| value.to_string_lossy().into_owned())
-                            .unwrap_or_default()
-                    );
+                    let name = current_file
+                        .file_name()
+                        .map(|value| value.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    self.label = match eta {
+                        Some(seconds) => fotogramma_core::tr!(
+                            "{index} / {total} · {name} · {percent}% · circa {} rimasti",
+                            "{index} / {total} · {name} · {percent}% · about {} left",
+                            fotogramma_core::formatting::format_eta(seconds)
+                        ),
+                        None => format!("{index} / {total} · {name} · {percent}%"),
+                    };
                 }
                 ConversionMessage::VerificationStarted {
                     index,
@@ -847,18 +886,25 @@ impl ConversionSession {
                             result.source.display()
                         ));
                     } else if result.verified {
-                        let note = size_note(&result);
+                        let note = format!("{}{}", size_note(&result), message_note(&result));
                         self.log.push(fotogramma_core::tr!(
                             "Verifica superata ✓ · originale sostituito: {}{note}",
                             "Verification passed ✓ · original replaced: {}{note}",
                             result.destination.display()
                         ));
                     } else if result.success {
-                        let note = size_note(&result);
+                        let note = format!("{}{}", size_note(&result), message_note(&result));
                         self.log.push(fotogramma_core::tr!(
                             "Completato ✓ · {}{note}",
                             "Completed ✓ · {}{note}",
                             result.destination.display()
+                        ));
+                    } else if result.skipped {
+                        self.log.push(fotogramma_core::tr!(
+                            "Scartato · {}: {}",
+                            "Dropped · {}: {}",
+                            result.source.display(),
+                            result.message
                         ));
                     } else {
                         self.log.push(fotogramma_core::tr!(
@@ -874,12 +920,19 @@ impl ConversionSession {
                     self.finished = true;
                     self.results = results;
                     let successes = self.results.iter().filter(|result| result.success).count();
-                    let errors = self.results.len().saturating_sub(successes);
+                    let skipped = self.results.iter().filter(|result| result.skipped).count();
+                    let errors = self.results.len().saturating_sub(successes + skipped);
                     let replacements = self.results.iter().filter(|result| result.replaced).count();
                     let mut summary = fotogramma_core::tr!(
                         "Conversione terminata: riuscite {successes}, errori {errors}",
                         "Conversion finished: {successes} succeeded, {errors} failed"
                     );
+                    if skipped > 0 {
+                        summary.push_str(&fotogramma_core::tr!(
+                            " · scartati per risparmio troppo piccolo: {skipped}",
+                            " · dropped for a saving that was too small: {skipped}"
+                        ));
+                    }
                     if replacements > 0 {
                         summary.push_str(&fotogramma_core::tr!(
                             " · originali sostituiti dopo verifica: {replacements}",
@@ -1253,6 +1306,49 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
                 RichText::new(tr_str(
                     "Resta valida la verifica completa con backup: vale solo per MKV e MP4.",
                     "Full verification with backup still applies: MKV and MP4 only.",
+                ))
+                .small()
+                .color(theme::MUTED),
+            );
+            if ui
+                .checkbox(
+                    &mut settings.prevent_sleep,
+                    tr_str(
+                        "Evita lo stop del computer durante le conversioni",
+                        "Keep the computer awake during conversions",
+                    ),
+                )
+                .changed()
+            {
+                changed = true;
+            }
+            ui.horizontal(|ui| {
+                let saving_label = ui.label(tr_str(
+                    "Soglia di risparmio predefinita",
+                    "Default minimum saving",
+                ));
+                if ui
+                    .add(
+                        egui::Slider::new(&mut settings.min_saving_percent, 0..=50)
+                            .step_by(5.0)
+                            .custom_formatter(|value, _| {
+                                if value == 0.0 {
+                                    tr_str("nessuna", "none").to_string()
+                                } else {
+                                    format!("{value}%")
+                                }
+                            }),
+                    )
+                    .labelled_by(saving_label.id)
+                    .changed()
+                {
+                    changed = true;
+                }
+            });
+            ui.label(
+                RichText::new(tr_str(
+                    "Se il nuovo file risparmia meno della soglia, si tiene l’originale e si scarta il risultato.",
+                    "If the new file saves less than this, the original is kept and the result dropped.",
                 ))
                 .small()
                 .color(theme::MUTED),
@@ -1673,6 +1769,7 @@ mod tests {
 
     fn video(path: &str) -> VideoInfo {
         VideoInfo {
+            hdr: false,
             path: PathBuf::from(path),
             relative_path: "a.mkv".into(),
             name: "a.mkv".into(),
@@ -1789,6 +1886,7 @@ mod tests {
             replaced: false,
             original_size: before,
             new_size: after,
+            skipped: false,
         }
     }
 
@@ -1800,6 +1898,7 @@ mod tests {
             destination_dir: PathBuf::from("/out"),
             container: "mkv".to_string(),
             replace_original: false,
+            options: ConversionOptions::default(),
         };
         let mut session = ConversionSession::new(plan, receiver, Arc::new(AtomicBool::new(false)));
         for result in &results {

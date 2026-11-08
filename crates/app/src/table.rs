@@ -333,6 +333,7 @@ mod tests {
 
     fn video(name: &str, codec: &str, category: Category, size: u64) -> VideoInfo {
         VideoInfo {
+            hdr: false,
             path: PathBuf::from(format!("/videos/{name}")),
             relative_path: format!("Vacanze/{name}"),
             name: name.to_string(),

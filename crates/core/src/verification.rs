@@ -41,6 +41,43 @@ pub fn stream_counts(
     stream_categories(&stdout)
 }
 
+/// Codec names of the subtitle streams of a file.
+pub fn subtitle_codecs(path: &Path, ffprobe: &Path) -> Result<Vec<String>, String> {
+    let mut command = prepare_command(ffprobe);
+    command
+        .args(["-v", "error", "-select_streams", "s"])
+        .args(["-show_entries", "stream=codec_name", "-of", "json"])
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    parse_subtitle_codecs(&String::from_utf8_lossy(&output.stdout))
+}
+
+pub fn parse_subtitle_codecs(json: &str) -> Result<Vec<String>, String> {
+    let value: serde_json::Value = serde_json::from_str(json).map_err(|error| error.to_string())?;
+    Ok(value
+        .get("streams")
+        .and_then(|streams| streams.as_array())
+        .map(|streams| {
+            streams
+                .iter()
+                .map(|stream| {
+                    stream
+                        .get("codec_name")
+                        .and_then(|name| name.as_str())
+                        .unwrap_or("unknown")
+                        .to_string()
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 /// Validate metadata, duration, streams and a full decode before replacement.
 pub fn validate_conversion_output(
     original: &VideoInfo,
@@ -291,6 +328,7 @@ mod tests {
 
     fn video(path: &Path) -> VideoInfo {
         VideoInfo {
+            hdr: false,
             path: path.to_path_buf(),
             relative_path: "one.mkv".into(),
             name: "one.mkv".into(),
@@ -374,5 +412,16 @@ mod tests {
         );
         assert!(!valid);
         let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn subtitle_codecs_are_read_from_ffprobe_json() {
+        let json = r#"{"streams":[{"codec_name":"subrip"},{"codec_name":"hdmv_pgs_subtitle"},{}]}"#;
+        assert_eq!(
+            parse_subtitle_codecs(json).unwrap(),
+            vec!["subrip", "hdmv_pgs_subtitle", "unknown"]
+        );
+        assert!(parse_subtitle_codecs("{}").unwrap().is_empty());
+        assert!(parse_subtitle_codecs("not json").is_err());
     }
 }

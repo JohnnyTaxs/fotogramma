@@ -21,6 +21,13 @@ pub struct Settings {
     pub window_width: Option<f32>,
     #[serde(default)]
     pub window_height: Option<f32>,
+    /// Keep the computer awake while a conversion runs.
+    #[serde(default = "default_true")]
+    pub prevent_sleep: bool,
+    /// Keep the original, and drop the result, when it saves less than this
+    /// percentage. 0 keeps every result.
+    #[serde(default)]
+    pub min_saving_percent: u8,
     /// Interface language: `auto` (follow the system), `it` or `en`.
     #[serde(default = "default_language")]
     pub language: String,
@@ -83,6 +90,8 @@ impl Default for Settings {
             window_height: None,
             language: default_language(),
             check_updates: true,
+            prevent_sleep: true,
+            min_saving_percent: 0,
             skipped_update: String::new(),
             accepted_codecs: default_accepted_codecs(),
             replace_original: false,
@@ -156,6 +165,8 @@ mod tests {
             window_height: Some(820.0),
             language: "en".to_string(),
             check_updates: false,
+            prevent_sleep: false,
+            min_saving_percent: 15,
             skipped_update: "v9.9.9".to_string(),
             accepted_codecs: vec!["h264".to_string()],
             replace_original: true,
@@ -175,6 +186,8 @@ mod tests {
         assert_eq!(parsed.output_dir, "/Volumes/Out");
         assert_eq!(parsed.language, "en");
         assert!(!parsed.check_updates);
+        assert!(!parsed.prevent_sleep);
+        assert_eq!(parsed.min_saving_percent, 15);
         assert_eq!(parsed.skipped_update, "v9.9.9");
     }
 
@@ -191,6 +204,8 @@ mod tests {
         assert!(parsed.output_dir.is_empty());
         assert_eq!(parsed.language, "auto");
         assert!(parsed.check_updates);
+        assert!(parsed.prevent_sleep);
+        assert_eq!(parsed.min_saving_percent, 0);
         assert!(parsed.skipped_update.is_empty());
     }
 }

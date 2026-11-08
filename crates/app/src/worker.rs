@@ -3,13 +3,17 @@
 
 use eframe::egui;
 use fotogramma_core::conversion::{
-    allocate_output_path, allocate_partial_path, build_ffmpeg_args, ConversionProfile,
+    allocate_output_path, allocate_partial_path, build_ffmpeg_args, container_for,
+    profile_for_video, ConversionProfile,
 };
+use fotogramma_core::formatting::SpaceChange;
 use fotogramma_core::i18n::tr_str;
 use fotogramma_core::media_tools::{ffmpeg_path, ffprobe_path, prepare_command};
 use fotogramma_core::scanner::{discover_videos, probe_videos, DiscoveryWarning, VideoInfo};
 use fotogramma_core::update::{self, InstallTarget, Release};
-use fotogramma_core::verification::{replace_verified_output, validate_conversion_output};
+use fotogramma_core::verification::{
+    replace_verified_output, subtitle_codecs, validate_conversion_output,
+};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -112,6 +116,16 @@ fn run_scan(
     Ok(())
 }
 
+/// What a conversion run is asked to do beyond the encoder settings.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ConversionOptions {
+    /// Keep the original, and drop the result, when the new file saves less
+    /// than this percentage. 0 keeps every result.
+    pub min_saving_percent: u8,
+    /// Keep the computer awake while the queue runs.
+    pub prevent_sleep: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct ConversionResult {
     pub source: PathBuf,
@@ -124,6 +138,29 @@ pub struct ConversionResult {
     /// Size of the original before the conversion, and of the result after it.
     pub original_size: Option<u64>,
     pub new_size: Option<u64>,
+    /// The result saved too little: it was dropped and the original kept.
+    pub skipped: bool,
+}
+
+/// Give a converted file the modification date of the original, so media
+/// servers that sort by date do not see the whole library as new.
+fn restore_mtime(time: Option<std::time::SystemTime>, path: &std::path::Path) {
+    let Some(time) = time else {
+        return;
+    };
+    if let Ok(file) = std::fs::OpenOptions::new().write(true).open(path) {
+        let _ = file.set_modified(time);
+    }
+}
+
+/// Seconds left for `remaining_media` seconds of video, from how fast the
+/// current file has been going. `None` until there is something to go on.
+fn estimate_seconds_left(done_media: f64, wall_seconds: f64, remaining_media: f64) -> Option<u64> {
+    if done_media <= 0.0 || wall_seconds < 2.0 {
+        return None;
+    }
+    let speed = done_media / wall_seconds;
+    Some((remaining_media / speed).round() as u64)
 }
 
 fn file_size(path: &std::path::Path) -> Option<u64> {
@@ -142,6 +179,7 @@ impl ConversionResult {
             replaced: false,
             original_size: None,
             new_size: None,
+            skipped: false,
         }
     }
 }
@@ -159,6 +197,8 @@ pub enum ConversionMessage {
         total: usize,
         percent: u8,
         current_file: PathBuf,
+        /// Rough seconds left for the whole queue, once the speed is known.
+        eta: Option<u64>,
     },
     VerificationStarted {
         index: usize,
@@ -169,12 +209,14 @@ pub enum ConversionMessage {
     Failed(String),
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_conversion(
     videos: Vec<VideoInfo>,
     profile: ConversionProfile,
     destination_dir: PathBuf,
     container: String,
     replace_original: bool,
+    options: ConversionOptions,
     cancel: Arc<AtomicBool>,
     ctx: egui::Context,
 ) -> Receiver<ConversionMessage> {
@@ -186,6 +228,7 @@ pub fn spawn_conversion(
             destination_dir,
             container,
             replace_original,
+            options,
             cancel,
             &sender,
             &ctx,
@@ -204,11 +247,15 @@ fn run_conversion(
     destination_dir: PathBuf,
     container: String,
     replace_original: bool,
+    options: ConversionOptions,
     cancel: Arc<AtomicBool>,
     sender: &Sender<ConversionMessage>,
     ctx: &egui::Context,
 ) -> Result<(), String> {
     let ffmpeg = ffmpeg_path()?;
+    // Held until the queue ends, on this thread (Windows ties it to the thread).
+    let _awake = crate::platform::SleepGuard::acquire(options.prevent_sleep);
+    let ffprobe = ffprobe_path().ok();
     if !replace_original {
         std::fs::create_dir_all(&destination_dir).map_err(|error| error.to_string())?;
     }
@@ -219,6 +266,33 @@ fn run_conversion(
         if cancel.load(Ordering::Relaxed) {
             break;
         }
+        // MP4 cannot hold most subtitles: such a file goes into MKV instead.
+        let mut notes: Vec<String> = Vec::new();
+        let mut file_container = container.clone();
+        if !replace_original {
+            let codecs = ffprobe
+                .as_ref()
+                .and_then(|path| subtitle_codecs(&video.path, path).ok())
+                .unwrap_or_default();
+            file_container = container_for(&container, &codecs).to_string();
+            if file_container != container {
+                notes.push(
+                    tr_str(
+                        "sottotitoli non adatti a MP4: salvato come MKV",
+                        "subtitles do not fit MP4: saved as MKV",
+                    )
+                    .to_string(),
+                );
+            }
+        }
+        let file_profile = profile_for_video(&profile, video.hdr);
+        if video.hdr && file_profile.pixel_format != profile.pixel_format {
+            notes.push(tr_str("HDR: elaborato a 10 bit", "HDR: processed in 10 bit").to_string());
+        }
+        let remaining_seconds: f64 = videos[index + 1..]
+            .iter()
+            .map(|later| later.duration.unwrap_or(0.0))
+            .sum();
         let destination = if replace_original {
             match allocate_partial_path(&video.path) {
                 Ok(path) => path,
@@ -230,7 +304,7 @@ fn run_conversion(
                 }
             }
         } else {
-            match allocate_output_path(&video.path, &destination_dir, &container) {
+            match allocate_output_path(&video.path, &destination_dir, &file_container) {
                 Ok(path) => path,
                 Err(error) => {
                     let result = ConversionResult::failure(&video.path, &video.path, error);
@@ -249,18 +323,21 @@ fn run_conversion(
         });
         ctx.request_repaint();
 
-        let result = convert_one(
+        let mut result = convert_one(
             &ffmpeg,
-            &profile,
+            &file_profile,
             video,
             &destination,
-            index + 1,
-            total,
+            (index + 1, total),
             replace_original,
+            (options.min_saving_percent, remaining_seconds),
             &cancel,
             sender,
             ctx,
         );
+        if result.success && !notes.is_empty() {
+            result.message = notes.join(" · ");
+        }
         let _ = sender.send(ConversionMessage::FileCompleted(Box::new(result.clone())));
         ctx.request_repaint();
         results.push(result);
@@ -277,15 +354,19 @@ fn convert_one(
     profile: &ConversionProfile,
     video: &VideoInfo,
     destination: &std::path::Path,
-    file_index: usize,
-    total: usize,
+    (file_index, total): (usize, usize),
     replace_original: bool,
+    (min_saving_percent, remaining_seconds): (u8, f64),
     cancel: &Arc<AtomicBool>,
     sender: &Sender<ConversionMessage>,
     ctx: &egui::Context,
 ) -> ConversionResult {
     // Read before anything can replace the original.
     let original_size = file_size(&video.path);
+    let original_time = std::fs::metadata(&video.path)
+        .and_then(|metadata| metadata.modified())
+        .ok();
+    let started = std::time::Instant::now();
     let mut command = prepare_command(ffmpeg);
     command
         .args(build_ffmpeg_args(profile, &video.path, destination))
@@ -339,11 +420,17 @@ fn convert_one(
                     if let Some(duration) = video.duration.filter(|value| *value > 0.0) {
                         let elapsed = value.parse::<f64>().unwrap_or(0.0) / 1_000_000.0;
                         let percent = ((elapsed / duration) * 100.0).round().clamp(0.0, 99.0) as u8;
+                        let eta = estimate_seconds_left(
+                            elapsed,
+                            started.elapsed().as_secs_f64(),
+                            (duration - elapsed).max(0.0) + remaining_seconds,
+                        );
                         let _ = sender.send(ConversionMessage::Progress {
                             index: file_index,
                             total,
                             percent,
                             current_file: video.path.clone(),
+                            eta,
                         });
                         ctx.request_repaint();
                     }
@@ -353,6 +440,7 @@ fn convert_one(
                         total,
                         percent: 100,
                         current_file: video.path.clone(),
+                        eta: None,
                     });
                     ctx.request_repaint();
                 } else if !line.is_empty() {
@@ -391,6 +479,7 @@ fn convert_one(
             replaced: false,
             original_size: None,
             new_size: None,
+            skipped: false,
         };
     }
 
@@ -421,6 +510,33 @@ fn convert_one(
                 destination,
                 tr_str("File di output non creato", "Output file not created").to_string(),
             );
+        }
+    }
+
+    // Not worth it: keep the original and drop the result.
+    let new_size = file_size(destination);
+    if let (true, Some(before), Some(after)) = (min_saving_percent > 0, original_size, new_size) {
+        let limit = before as f64 * (100.0 - f64::from(min_saving_percent)) / 100.0;
+        if after as f64 > limit {
+            let saved = SpaceChange { before, after };
+            let _ = std::fs::remove_file(destination);
+            return ConversionResult {
+                source: video.path.clone(),
+                destination: destination.to_path_buf(),
+                success: false,
+                message: fotogramma_core::tr!(
+                    "risparmio {} sotto la soglia del {}%: originale tenuto, risultato scartato",
+                    "saving of {} is under the {}% threshold: original kept, result dropped",
+                    saved.signed_percent(),
+                    min_saving_percent
+                ),
+                cancelled: false,
+                verified: false,
+                replaced: false,
+                original_size,
+                new_size,
+                skipped: true,
+            };
         }
     }
 
@@ -455,6 +571,7 @@ fn convert_one(
             let _ = std::fs::remove_file(destination);
             return ConversionResult::failure(&video.path, destination, replacement_message);
         }
+        restore_mtime(original_time, &video.path);
         return ConversionResult {
             source: video.path.clone(),
             destination: video.path.clone(),
@@ -465,9 +582,11 @@ fn convert_one(
             replaced: true,
             original_size,
             new_size: file_size(&video.path),
+            skipped: false,
         };
     }
 
+    restore_mtime(original_time, destination);
     ConversionResult {
         source: video.path.clone(),
         destination: destination.to_path_buf(),
@@ -478,6 +597,7 @@ fn convert_one(
         replaced: false,
         original_size,
         new_size: file_size(destination),
+        skipped: false,
     }
 }
 
@@ -590,6 +710,7 @@ mod tests {
             directory.join("out"),
             "mkv".to_string(),
             false,
+            ConversionOptions::default(),
             Arc::new(AtomicBool::new(false)),
             egui::Context::default(),
         );
@@ -633,6 +754,7 @@ mod tests {
             directory.clone(),
             "mp4".to_string(),
             true,
+            ConversionOptions::default(),
             Arc::new(AtomicBool::new(false)),
             egui::Context::default(),
         );
@@ -657,5 +779,219 @@ mod tests {
             "the file was really replaced"
         );
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    // ---- real conversions with the new options (skipped without FFmpeg) ----
+
+    fn tools() -> Option<(PathBuf, PathBuf)> {
+        Some((ffmpeg_path().ok()?, ffprobe_path().ok()?))
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!("foto-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    /// A tiny mpeg4 clip made with the tools under test.
+    fn clip(ffmpeg: &std::path::Path, directory: &std::path::Path, name: &str) -> PathBuf {
+        let raw = directory.join("raw.yuv");
+        std::fs::write(&raw, vec![0u8; 64 * 64 * 3 / 2 * 10]).unwrap();
+        let path = directory.join(name);
+        let made = prepare_command(ffmpeg)
+            .args(["-y", "-hide_banner", "-loglevel", "error"])
+            .args(["-f", "rawvideo", "-pixel_format", "yuv420p"])
+            .args(["-video_size", "64x64", "-framerate", "5", "-i"])
+            .arg(&raw)
+            .args(["-c:v", "mpeg4"])
+            .arg(&path)
+            .stdout(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(made.success());
+        path
+    }
+
+    fn convert(
+        video: VideoInfo,
+        profile_key: &str,
+        container: &str,
+        destination: PathBuf,
+        replace: bool,
+        options: ConversionOptions,
+    ) -> ConversionResult {
+        let profile = builtin_profiles()
+            .into_iter()
+            .find(|p| p.key == profile_key)
+            .unwrap();
+        let receiver = spawn_conversion(
+            vec![video],
+            profile,
+            destination,
+            container.to_string(),
+            replace,
+            options,
+            Arc::new(AtomicBool::new(false)),
+            egui::Context::default(),
+        );
+        while let Ok(message) = receiver.recv_timeout(Duration::from_secs(120)) {
+            if let ConversionMessage::Completed(mut done) = message {
+                return done.remove(0);
+            }
+        }
+        panic!("the conversion did not finish");
+    }
+
+    #[test]
+    fn a_file_with_subtitles_goes_into_mkv_when_mp4_was_asked_for() {
+        let Some((_, ffprobe)) = tools() else {
+            eprintln!("skipped: no ffmpeg");
+            return;
+        };
+        let fixture =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/subtitles.mkv");
+        let directory = scratch("subs");
+        let source = directory.join("subtitles.mkv");
+        std::fs::copy(&fixture, &source).unwrap();
+        let video = probe_video(&source, &directory, &ffprobe, None).unwrap();
+        let result = convert(
+            video,
+            "fast",
+            "mp4",
+            directory.join("out"),
+            false,
+            ConversionOptions::default(),
+        );
+        assert!(result.success, "{}", result.message);
+        assert_eq!(result.destination.extension().unwrap(), "mkv");
+        assert!(result.message.contains("MKV"), "{}", result.message);
+        let codecs = subtitle_codecs(&result.destination, &ffprobe).unwrap();
+        assert_eq!(codecs, vec!["subrip"], "the subtitles are kept");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_result_that_saves_too_little_is_dropped_and_the_original_kept() {
+        let Some((ffmpeg, ffprobe)) = tools() else {
+            eprintln!("skipped: no ffmpeg");
+            return;
+        };
+        let directory = scratch("small");
+        let source = clip(&ffmpeg, &directory, "a.mp4");
+        let video = probe_video(&source, &directory, &ffprobe, None).unwrap();
+        let out = directory.join("out");
+        // 99% is a threshold no encode of a blank clip reaches.
+        let result = convert(
+            video,
+            "fast",
+            "mkv",
+            out.clone(),
+            false,
+            ConversionOptions {
+                min_saving_percent: 99,
+                prevent_sleep: false,
+            },
+        );
+        assert!(result.skipped && !result.success, "{}", result.message);
+        assert!(source.exists(), "the original is untouched");
+        assert!(
+            std::fs::read_dir(&out)
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true),
+            "the dropped result is deleted"
+        );
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn the_converted_file_keeps_the_date_of_the_original() {
+        let Some((ffmpeg, ffprobe)) = tools() else {
+            eprintln!("skipped: no ffmpeg");
+            return;
+        };
+        let directory = scratch("mtime");
+        let source = clip(&ffmpeg, &directory, "a.mp4");
+        let long_ago = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_500_000_000);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+        let video = probe_video(&source, &directory, &ffprobe, None).unwrap();
+        let result = convert(
+            video.clone(),
+            "fast",
+            "mkv",
+            directory.join("out"),
+            false,
+            ConversionOptions::default(),
+        );
+        assert!(result.success, "{}", result.message);
+        let modified = std::fs::metadata(&result.destination)
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(modified, long_ago, "a new file");
+
+        // And when the original is replaced.
+        let replaced = convert(
+            video,
+            "fast",
+            "mp4",
+            directory.clone(),
+            true,
+            ConversionOptions::default(),
+        );
+        assert!(replaced.replaced, "{}", replaced.message);
+        let modified = std::fs::metadata(&source).unwrap().modified().unwrap();
+        assert_eq!(modified, long_ago, "the replaced original");
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn an_hdr_source_is_processed_in_ten_bits_even_with_the_8_bit_preset() {
+        let Some((ffmpeg, ffprobe)) = tools() else {
+            eprintln!("skipped: no ffmpeg");
+            return;
+        };
+        let directory = scratch("hdr");
+        let source = clip(&ffmpeg, &directory, "a.mp4");
+        let mut video = probe_video(&source, &directory, &ffprobe, None).unwrap();
+        video.hdr = true;
+        let result = convert(
+            video,
+            "fast",
+            "mkv",
+            directory.join("out"),
+            false,
+            ConversionOptions::default(),
+        );
+        assert!(result.success, "{}", result.message);
+        let output = std::process::Command::new(&ffprobe)
+            .args(["-v", "error", "-select_streams", "v:0"])
+            .args(["-show_entries", "stream=pix_fmt", "-of", "csv=p=0"])
+            .arg(&result.destination)
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "yuv420p10le"
+        );
+        assert!(result.message.contains("10"), "{}", result.message);
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn the_time_left_follows_the_speed() {
+        // 10 s of video in 5 s of work is 2x: 60 s of video left is 30 s.
+        assert_eq!(estimate_seconds_left(10.0, 5.0, 60.0), Some(30));
+        assert_eq!(estimate_seconds_left(0.0, 5.0, 60.0), None);
+        assert_eq!(
+            estimate_seconds_left(10.0, 1.0, 60.0),
+            None,
+            "too early to tell"
+        );
     }
 }
