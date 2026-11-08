@@ -81,6 +81,10 @@ The window in `dialogs.rs` shows the release notes, then *Update and restart*, *
 
 `MediaKind` is `Anime` or `Live`. `detect_kind(path)` tokenizes the folder names above a file (lowercase, split on non-alphanumerics) and returns `Anime` if any token is an anime word, else `Live` if any is a film/series word; `detect_selection` requires the files of a selection to agree. The dialog (`ConversionDialog::effective_kind`) combines the setting (`auto`, `anime`, `live`) with the detection and applies only the x265 tune: `animation` for anime, none for live action. The audio choice is merged into built-in profiles in `current_profile`, so every preset honours it.
 
+### `crates/app/src/markdown.rs`
+
+A small Markdown renderer for the release notes in the update window: headings, bullet and numbered lists, bold, italic, inline code, code blocks, quotes, rules; links show their text only (the app opens no browser). `parse_blocks` and `parse_inline` are pure and tested. `sanitize` runs first because the notes come from the network and the interface font cannot draw every character: arrows become `->`, check marks `OK`, anything unknown `?`. Bullets are drawn, not typed.
+
 ### Converted videos
 
 `FotogrammaApp::converted` maps each original to the file made from it (the original's own path when it was replaced); it lives in memory and is cleared by a new scan. `mark_replaced_videos` runs every frame, so rows change as the queue advances: a replaced video is reclassified as HEVC with its new size (and the statistics are recomputed), any success is removed from the selection, and `table::show` shows *Already converted* with the output path in the tooltip. `convertible_in` (Select all) and the export skip converted videos; `conversion_progress` gives the pending and done counts used by the card and the hint.

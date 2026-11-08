@@ -4,6 +4,7 @@
 mod app;
 mod dialogs;
 mod icon;
+mod markdown;
 mod platform;
 mod settings;
 mod table;

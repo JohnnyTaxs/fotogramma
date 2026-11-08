@@ -1525,13 +1525,13 @@ pub fn show_update(ctx: &egui::Context, dialog: &mut UpdateDialog, busy: bool) -
             let notes = if dialog.release.notes.is_empty() {
                 tr_str("Nessuna nota di rilascio.", "No release notes.").to_string()
             } else {
-                dialog.release.notes.chars().take(4000).collect()
+                dialog.release.notes.chars().take(6000).collect()
             };
             egui::ScrollArea::vertical()
-                .max_height(220.0)
+                .max_height(280.0)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    ui.label(RichText::new(notes).small().color(theme::MUTED));
+                    crate::markdown::show(ui, &notes);
                 });
             ui.add_space(6.0);
 

@@ -2045,4 +2045,50 @@ mod small_snapshot_tests {
         assert_eq!(app.conversion_progress().0, 0);
         assert_eq!(app.conversion_progress().1, 2);
     }
+
+    #[test]
+    fn release_notes_are_rendered_not_shown_raw() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                let mut release = release("v9.9.9");
+                release.notes = include_str!("../../../docs/releases/v2.6.0.md").to_string();
+                app.update = Some(UpdateDialog::new(release, None));
+                app
+            });
+        harness.run();
+        assert!(
+            harness.query_by_label_contains("**").is_none(),
+            "bold markers"
+        );
+        assert!(
+            harness.query_by_label_contains("## ").is_none(),
+            "heading markers"
+        );
+        assert!(
+            harness.query_by_label_contains("`").is_none(),
+            "code markers"
+        );
+        harness.get_by_label_contains("Space saved.");
+    }
+
+    #[test]
+    fn notes_with_unsupported_characters_do_not_crash_the_window() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                let mut release = release("v9.9.9");
+                release.notes =
+                    "# Novità → 日本語 🎉\n\n- **Nuovo** ✔ ✓ è ’a’ ‘b’ “c” … – — × · © ½ test\n"
+                        .to_string();
+                app.update = Some(UpdateDialog::new(release, None));
+                app
+            });
+        harness.run();
+    }
 }
