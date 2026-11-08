@@ -32,6 +32,7 @@ It is a small native desktop app, not a service: no server, no database, no acco
 - Statistics, filters, search, sortable columns, and multi-file selection, with a **Select all** button for everything convertible in the current view.
 - **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
 - Full-output validation before replacing an original file.
+- **Space saved:** each converted file shows its new size against the old one, and the end of a conversion reports the total space freed (or used, if a file grew).
 - **Content type:** anime or live action (films and series). Anime gets `-tune animation`; "Automatic" reads the folders of the path (`Anime`, `Film`, `Serie TV`, `Movies`…), in English and Italian.
 - **Self-update:** the app checks GitHub at startup, shows the release notes, and installs the new version after verifying its checksum. It can be switched off.
 - **English and Italian**, chosen automatically from the system language, with an optional manual override.

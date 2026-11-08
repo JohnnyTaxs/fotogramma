@@ -6,7 +6,7 @@ use fotogramma_core::conversion::{
     custom_profile, detect_selection, profile as builtin_profile, AudioMode, ConversionProfile,
     MediaKind, PRESETS,
 };
-use fotogramma_core::formatting::{codec_label, format_bytes, format_duration};
+use fotogramma_core::formatting::{codec_label, format_bytes, format_duration, SpaceChange};
 use fotogramma_core::scanner::VideoInfo;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -739,6 +739,23 @@ pub struct ConversionSession {
     pub results: Vec<ConversionResult>,
     pub finished: bool,
     pub failed: bool,
+    /// Space freed by the files that converted, known once the queue ends.
+    pub space: Option<SpaceChange>,
+}
+
+/// `, 1,2 GB instead of 2,0 GB (-40%)` for one converted file.
+fn size_note(result: &ConversionResult) -> String {
+    let (Some(before), Some(after)) = (result.original_size, result.new_size) else {
+        return String::new();
+    };
+    let change = SpaceChange { before, after };
+    fotogramma_core::tr!(
+        " · {} invece di {} ({})",
+        " · {} instead of {} ({})",
+        format_bytes(Some(after)),
+        format_bytes(Some(before)),
+        change.signed_percent()
+    )
 }
 
 impl ConversionSession {
@@ -758,6 +775,7 @@ impl ConversionSession {
             results: Vec::new(),
             finished: false,
             failed: false,
+            space: None,
         }
     }
 
@@ -829,15 +847,17 @@ impl ConversionSession {
                             result.source.display()
                         ));
                     } else if result.verified {
+                        let note = size_note(&result);
                         self.log.push(fotogramma_core::tr!(
-                            "Verifica superata ✓ · originale sostituito: {}",
-                            "Verification passed ✓ · original replaced: {}",
+                            "Verifica superata ✓ · originale sostituito: {}{note}",
+                            "Verification passed ✓ · original replaced: {}{note}",
                             result.destination.display()
                         ));
                     } else if result.success {
+                        let note = size_note(&result);
                         self.log.push(fotogramma_core::tr!(
-                            "Completato ✓ · {}",
-                            "Completed ✓ · {}",
+                            "Completato ✓ · {}{note}",
+                            "Completed ✓ · {}{note}",
                             result.destination.display()
                         ));
                     } else {
@@ -868,6 +888,14 @@ impl ConversionSession {
                     }
                     self.label = summary;
                     self.percent = 100;
+                    let mut space = SpaceChange::default();
+                    for result in self.results.iter().filter(|result| result.success) {
+                        if let (Some(before), Some(after)) = (result.original_size, result.new_size)
+                        {
+                            space.add(before, after);
+                        }
+                    }
+                    self.space = (space.before > 0).then_some(space);
                 }
                 ConversionMessage::Failed(message) => {
                     self.log.push(message);
@@ -916,6 +944,34 @@ pub fn show_progress(ctx: &egui::Context, session: &mut ConversionSession) -> Pr
             };
             ui.label(RichText::new(heading).size(theme::PAGE_TITLE_SIZE).strong());
             ui.label(&session.label);
+            if let Some(space) = session.space {
+                let (text, color) = if space.is_saving() {
+                    (
+                        fotogramma_core::tr!(
+                            "Spazio risparmiato: {} ({}) · da {} a {}",
+                            "Space saved: {} ({}) · from {} to {}",
+                            format_bytes(Some(space.delta())),
+                            space.signed_percent(),
+                            format_bytes(Some(space.before)),
+                            format_bytes(Some(space.after))
+                        ),
+                        theme::MINT,
+                    )
+                } else {
+                    (
+                        fotogramma_core::tr!(
+                            "Spazio in più: {} ({}) · da {} a {}",
+                            "Extra space used: {} ({}) · from {} to {}",
+                            format_bytes(Some(space.delta())),
+                            space.signed_percent(),
+                            format_bytes(Some(space.before)),
+                            format_bytes(Some(space.after))
+                        ),
+                        theme::CORAL_HOVER,
+                    )
+                };
+                ui.label(RichText::new(text).strong().color(color));
+            }
             ui.add(
                 egui::ProgressBar::new(f32::from(session.percent) / 100.0)
                     .desired_height(10.0)
@@ -1709,5 +1765,89 @@ mod tests {
         let args = arguments(&dialog);
         assert!(has(&args, ["-c:a", "aac"]));
         assert!(has(&args, ["-b:a", "160k"]));
+    }
+
+    fn finished_result(
+        name: &str,
+        before: Option<u64>,
+        after: Option<u64>,
+        ok: bool,
+    ) -> ConversionResult {
+        ConversionResult {
+            source: PathBuf::from(format!("/in/{name}")),
+            destination: PathBuf::from(format!("/out/{name}")),
+            success: ok,
+            message: String::new(),
+            cancelled: false,
+            verified: false,
+            replaced: false,
+            original_size: before,
+            new_size: after,
+        }
+    }
+
+    fn session_after(results: Vec<ConversionResult>) -> ConversionSession {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let plan = ConversionPlan {
+            videos: Vec::new(),
+            profile: builtin_profile("balanced").unwrap(),
+            destination_dir: PathBuf::from("/out"),
+            container: "mkv".to_string(),
+            replace_original: false,
+        };
+        let mut session = ConversionSession::new(plan, receiver, Arc::new(AtomicBool::new(false)));
+        for result in &results {
+            sender
+                .send(ConversionMessage::FileCompleted(Box::new(result.clone())))
+                .unwrap();
+        }
+        sender.send(ConversionMessage::Completed(results)).unwrap();
+        session.poll();
+        session
+    }
+
+    #[test]
+    fn the_session_adds_up_the_space_saved_by_the_files_that_converted() {
+        let session = session_after(vec![
+            finished_result("a.mkv", Some(2_000), Some(800), true),
+            finished_result("b.mkv", Some(1_000), Some(400), true),
+            // A failure frees nothing and must not count.
+            finished_result("c.mkv", Some(9_000), None, false),
+        ]);
+        let space = session.space.expect("a summary");
+        assert_eq!((space.before, space.after), (3_000, 1_200));
+        assert!(space.is_saving());
+        assert_eq!(space.signed_percent(), "-60%");
+    }
+
+    #[test]
+    fn each_finished_file_says_how_much_smaller_it_is() {
+        let session = session_after(vec![finished_result("a.mkv", Some(2_000), Some(800), true)]);
+        let line = session
+            .log
+            .iter()
+            .find(|line| line.contains("a.mkv"))
+            .unwrap();
+        assert!(line.contains("-60%"), "{line}");
+        assert!(line.contains("invece di"), "{line}");
+    }
+
+    #[test]
+    fn a_result_that_grew_is_reported_as_growth() {
+        let session = session_after(vec![finished_result(
+            "a.mkv",
+            Some(1_000),
+            Some(1_300),
+            true,
+        )]);
+        let space = session.space.unwrap();
+        assert!(!space.is_saving());
+        assert_eq!(space.signed_percent(), "+30%");
+    }
+
+    #[test]
+    fn no_sizes_means_no_summary() {
+        let session = session_after(vec![finished_result("a.mkv", None, None, true)]);
+        assert!(session.space.is_none());
     }
 }

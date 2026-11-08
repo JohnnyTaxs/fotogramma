@@ -121,6 +121,13 @@ pub struct ConversionResult {
     pub cancelled: bool,
     pub verified: bool,
     pub replaced: bool,
+    /// Size of the original before the conversion, and of the result after it.
+    pub original_size: Option<u64>,
+    pub new_size: Option<u64>,
+}
+
+fn file_size(path: &std::path::Path) -> Option<u64> {
+    std::fs::metadata(path).ok().map(|metadata| metadata.len())
 }
 
 impl ConversionResult {
@@ -133,6 +140,8 @@ impl ConversionResult {
             cancelled: false,
             verified: false,
             replaced: false,
+            original_size: None,
+            new_size: None,
         }
     }
 }
@@ -275,6 +284,8 @@ fn convert_one(
     sender: &Sender<ConversionMessage>,
     ctx: &egui::Context,
 ) -> ConversionResult {
+    // Read before anything can replace the original.
+    let original_size = file_size(&video.path);
     let mut command = prepare_command(ffmpeg);
     command
         .args(build_ffmpeg_args(profile, &video.path, destination))
@@ -378,6 +389,8 @@ fn convert_one(
             cancelled: true,
             verified: false,
             replaced: false,
+            original_size: None,
+            new_size: None,
         };
     }
 
@@ -450,6 +463,8 @@ fn convert_one(
             cancelled: false,
             verified: true,
             replaced: true,
+            original_size,
+            new_size: file_size(&video.path),
         };
     }
 
@@ -461,6 +476,8 @@ fn convert_one(
         cancelled: false,
         verified: false,
         replaced: false,
+        original_size,
+        new_size: file_size(destination),
     }
 }
 
@@ -525,4 +542,120 @@ pub fn spawn_update_install(
         ctx.request_repaint();
     });
     receiver
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fotogramma_core::conversion::builtin_profiles;
+    use fotogramma_core::scanner::{probe_video, Category};
+    use std::process::Stdio;
+    use std::time::Duration;
+
+    /// Converts a real clip and checks that both sizes reach the result.
+    /// Skipped when FFmpeg is not installed.
+    #[test]
+    fn a_real_conversion_reports_both_sizes() {
+        let (Ok(ffmpeg), Ok(ffprobe)) = (ffmpeg_path(), ffprobe_path()) else {
+            eprintln!("skipped: ffmpeg and ffprobe are not available");
+            return;
+        };
+        let directory = std::env::temp_dir().join(format!("foto-size-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let raw = directory.join("source.yuv");
+        std::fs::write(&raw, vec![0u8; 64 * 64 * 3 / 2 * 10]).unwrap();
+        let source = directory.join("clip.mp4");
+        let made = prepare_command(&ffmpeg)
+            .args(["-y", "-hide_banner", "-loglevel", "error"])
+            .args(["-f", "rawvideo", "-pixel_format", "yuv420p"])
+            .args(["-video_size", "64x64", "-framerate", "5", "-i"])
+            .arg(&raw)
+            .args(["-c:v", "mpeg4"])
+            .arg(&source)
+            .stdout(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(made.success());
+
+        let video = probe_video(&source, &directory, &ffprobe, None).unwrap();
+        assert_eq!(video.category, Category::Convert);
+        let profile = builtin_profiles()
+            .into_iter()
+            .find(|p| p.key == "fast")
+            .unwrap();
+        let receiver = spawn_conversion(
+            vec![video],
+            profile,
+            directory.join("out"),
+            "mkv".to_string(),
+            false,
+            Arc::new(AtomicBool::new(false)),
+            egui::Context::default(),
+        );
+        let mut results = None;
+        while let Ok(message) = receiver.recv_timeout(Duration::from_secs(120)) {
+            if let ConversionMessage::Completed(done) = message {
+                results = Some(done);
+                break;
+            }
+        }
+        let results = results.expect("the conversion finishes");
+        let result = &results[0];
+        assert!(result.success, "{}", result.message);
+        let before = std::fs::metadata(&source).unwrap().len();
+        let after = std::fs::metadata(&result.destination).unwrap().len();
+        assert_eq!(result.original_size, Some(before));
+        assert_eq!(result.new_size, Some(after));
+
+        // Replacing the original: the size before is read before the swap.
+        let second = directory.join("second.mp4");
+        let made = prepare_command(&ffmpeg)
+            .args(["-y", "-hide_banner", "-loglevel", "error"])
+            .args(["-f", "rawvideo", "-pixel_format", "yuv420p"])
+            .args(["-video_size", "64x64", "-framerate", "5", "-i"])
+            .arg(&raw)
+            .args(["-c:v", "mpeg4"])
+            .arg(&second)
+            .stdout(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let before = std::fs::metadata(&second).unwrap().len();
+        let video = probe_video(&second, &directory, &ffprobe, None).unwrap();
+        let profile = builtin_profiles()
+            .into_iter()
+            .find(|p| p.key == "fast")
+            .unwrap();
+        let receiver = spawn_conversion(
+            vec![video],
+            profile,
+            directory.clone(),
+            "mp4".to_string(),
+            true,
+            Arc::new(AtomicBool::new(false)),
+            egui::Context::default(),
+        );
+        let mut results = None;
+        while let Ok(message) = receiver.recv_timeout(Duration::from_secs(120)) {
+            if let ConversionMessage::Completed(done) = message {
+                results = Some(done);
+                break;
+            }
+        }
+        let results = results.expect("the replacement finishes");
+        let result = &results[0];
+        assert!(result.replaced, "{}", result.message);
+        assert_eq!(result.original_size, Some(before));
+        assert_eq!(
+            result.new_size,
+            std::fs::metadata(&second).ok().map(|m| m.len())
+        );
+        assert_ne!(
+            result.new_size,
+            Some(before),
+            "the file was really replaced"
+        );
+        let _ = std::fs::remove_dir_all(&directory);
+    }
 }

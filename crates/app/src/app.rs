@@ -472,7 +472,23 @@ impl FotogrammaApp {
         }
         if close_session {
             self.mark_replaced_videos();
+            let saved = self
+                .session
+                .as_ref()
+                .and_then(|session| session.space)
+                .filter(|space| space.is_saving() && space.delta() > 0);
             self.session = None;
+            if let Some(space) = saved {
+                self.set_status(
+                    fotogramma_core::tr!(
+                        "Spazio risparmiato: {} ({})",
+                        "Space saved: {} ({})",
+                        format_bytes(Some(space.delta())),
+                        space.signed_percent()
+                    ),
+                    Duration::from_secs(10),
+                );
+            }
         }
 
         if self.show_settings {

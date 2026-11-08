@@ -81,6 +81,10 @@ The window in `dialogs.rs` shows the release notes, then *Update and restart*, *
 
 `MediaKind` is `Anime` or `Live`. `detect_kind(path)` tokenizes the folder names above a file (lowercase, split on non-alphanumerics) and returns `Anime` if any token is an anime word, else `Live` if any is a film/series word; `detect_selection` requires the files of a selection to agree. The dialog (`ConversionDialog::effective_kind`) combines the setting (`auto`, `anime`, `live`) with the detection and applies only the x265 tune: `animation` for anime, none for live action. The audio choice is merged into built-in profiles in `current_profile`, so every preset honours it.
 
+### Space saved
+
+`ConversionResult` carries `original_size` (read before the conversion, so before any replacement) and `new_size` (read after it). `formatting::SpaceChange` adds up the files that succeeded and gives the saved or added bytes and the signed percentage. `ConversionSession` keeps the total in `space` once the queue ends; the progress dialog shows it, each log line carries the per-file figures, and closing the dialog leaves a line in the status bar.
+
 ### `crates/core/src/verification.rs`
 
 Verified replacement has two separate phases:
