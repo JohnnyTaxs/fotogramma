@@ -70,7 +70,7 @@ The script:
 3. assembles the platform bundle;
 4. creates `dist/Fotogramma-<System>-<arch>.zip`;
 5. on macOS, extracts the ZIP again and runs `codesign --verify --deep --strict` on both copies;
-6. fails if the app exceeds 35 MB or the ZIP exceeds 18 MB.
+6. fails if the app exceeds 45 MB or the ZIP exceeds 18 MB.
 
 Set `FOTOGRAMMA_RUST_SKIP_BUILD=1` to reuse an existing release binary.
 

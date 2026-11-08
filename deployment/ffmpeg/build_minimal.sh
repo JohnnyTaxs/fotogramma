@@ -24,7 +24,7 @@ JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null |
 mkdir -p "$WORK"
 if [ ! -d "$SRC" ]; then
   echo "Downloading FFmpeg $VERSION ..."
-  curl -fL --retry 3 -o "$WORK/ffmpeg-$VERSION.tar.xz" \
+  curl -fL --retry 5 --retry-all-errors -o "$WORK/ffmpeg-$VERSION.tar.xz" \
     "https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz"
   tar -xf "$WORK/ffmpeg-$VERSION.tar.xz" -C "$WORK"
 fi

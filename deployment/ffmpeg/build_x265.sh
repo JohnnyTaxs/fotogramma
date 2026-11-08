@@ -45,7 +45,7 @@ esac
 mkdir -p "$WORK"
 if [ ! -d "$SRC" ]; then
   echo "Downloading x265 $VERSION ..."
-  curl -fL --retry 3 -o "$WORK/x265-$VERSION.tar.gz" \
+  curl -fL --retry 5 --retry-all-errors -o "$WORK/x265-$VERSION.tar.gz" \
     "https://github.com/Multicorewareinc/x265/releases/download/$VERSION/x265_$VERSION.tar.gz"
   tar -xf "$WORK/x265-$VERSION.tar.gz" -C "$WORK"
 fi

@@ -26,7 +26,7 @@ JOBS="$(nproc 2>/dev/null || echo 4)"
 mkdir -p "$WORK"
 if [ ! -d "$SRC" ]; then
   echo "Downloading FFmpeg $VERSION ..."
-  curl -fL --retry 3 -o "$WORK/ffmpeg-$VERSION.tar.xz" \
+  curl -fL --retry 5 --retry-all-errors -o "$WORK/ffmpeg-$VERSION.tar.xz" \
     "https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz"
   tar -xf "$WORK/ffmpeg-$VERSION.tar.xz" -C "$WORK"
 fi
