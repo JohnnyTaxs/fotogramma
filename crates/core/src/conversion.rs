@@ -319,4 +319,61 @@ mod tests {
             .starts_with("Tramonto.h265.partial"));
         assert!(allocate_partial_path(Path::new("/videos/one.webm")).is_err());
     }
+
+    #[test]
+    fn custom_profile_arguments_carry_every_choice() {
+        let profile = custom_profile(
+            22,
+            "slow",
+            "yuv420p10le",
+            Some("grain"),
+            Some(3),
+            AudioMode::Aac,
+            160,
+        );
+        let args = build_ffmpeg_args(&profile, Path::new("/v/a.mkv"), Path::new("/v/a.h265.mp4"));
+        let has = |pair: [&str; 2]| args.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
+        assert!(has(["-crf", "22"]));
+        assert!(has(["-preset", "slow"]));
+        assert!(has(["-tune", "grain"]));
+        assert!(has(["-x265-params", "aq-mode=3"]));
+        assert!(has(["-c:a", "aac"]));
+        assert!(has(["-b:a", "160k"]));
+        assert!(has(["-movflags", "+faststart"]));
+    }
+
+    #[test]
+    fn every_profile_maps_all_streams_and_never_overwrites() {
+        for profile in builtin_profiles() {
+            let args =
+                build_ffmpeg_args(&profile, Path::new("/v/a.mkv"), Path::new("/v/a.h265.mkv"));
+            assert_eq!(
+                args.first().map(String::as_str),
+                Some("-n"),
+                "{}",
+                profile.key
+            );
+            assert!(
+                args.windows(2).any(|w| w[0] == "-map" && w[1] == "0"),
+                "{}",
+                profile.key
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_tune_is_left_out() {
+        let profile = custom_profile(
+            23,
+            "medium",
+            "yuv420p",
+            Some(""),
+            None,
+            AudioMode::Copy,
+            128,
+        );
+        let args = build_ffmpeg_args(&profile, Path::new("/v/a.mkv"), Path::new("/v/a.h265.mkv"));
+        assert!(!args.iter().any(|value| value == "-tune"));
+        assert!(!args.iter().any(|value| value == "-x265-params"));
+    }
 }

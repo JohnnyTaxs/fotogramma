@@ -1,8 +1,12 @@
-# Fotogramma
+<p align="center">
+  <img src="deployment/fotogramma.iconset/icon_256x256.png" alt="Fotogramma icon" width="128" height="128">
+</p>
+
+<h1 align="center">Fotogramma</h1>
 
 Fotogramma is a **native desktop application** for inspecting a video library, identifying files that may benefit from H.265 conversion, and converting videos directly with FFmpeg.
 
-Version 2 is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no browser, WebView, HTTP server, or launcher. The Python 1.x application has been removed; the repository now contains only the Rust workspace.
+It is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no browser, WebView, HTTP server, or launcher. The interface is in Italian. The Python 1.x application has been removed; the repository contains only the Rust workspace.
 
 ![Fotogramma Desktop](docs/assets/fotogramma-native-results.png)
 
@@ -12,11 +16,11 @@ Version 2 is written in **Rust** with `egui`/`eframe` and renders with OpenGL: n
 
 - Native desktop window for macOS, Windows, and Linux.
 - Recursive discovery of `.mp4`, `.mkv`, and `.webm` files.
-- Clear grouping into **to convert**, **already compatible** (HEVC/AV1), and **unreadable** files.
+- Clear grouping into **to convert**, **already compatible** (HEVC and AV1 by default), and **unreadable** files.
 - Statistics, filters, search, sortable columns, and multi-file selection.
 - **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
 - Full-output validation before replacing an original file.
-- **Settings** window: choose which codecs count as already compatible (home and table update at once) and the conversion defaults (replace original, profile, container).
+- **Settings** window: choose which codecs count as already compatible (the home page, statistics, and table update at once, no new scan) and the conversion defaults (replace original, profile, container).
 - Original application icon and Cinema Pop theme.
 - No videos are modified during inspection. No media or metadata is uploaded during scanning or conversion.
 
@@ -26,13 +30,23 @@ The portable archives are an order of magnitude smaller than the Qt/Python 1.x b
 
 | Platform | Application | ZIP |
 | --- | --- | --- |
-| macOS ARM | 22.7 MB | 10.2 MB |
+| macOS ARM | 22.7 MB | 10.3 MB |
 | Linux x86_64 | 40.3 MB | 13.3 MB |
 | Windows amd64 | 35.4 MB | 11.1 MB |
 
-The macOS build went from 106 MB and a 44 MB ZIP in 1.0.4 to 22.7 MB and 10.2 MB. The Linux and Windows bundles are larger because x265's x86 assembly is about twice the size of the arm64 build, and the C++ runtime travels inside that library instead of as a separate file.
+The macOS build went from 106 MB and a 44 MB ZIP in 1.0.4 to 22.7 MB and 10.3 MB. The Linux and Windows bundles are larger because x265's x86 assembly is about twice the size of the arm64 build, and the C++ runtime travels inside that library instead of as a separate file.
 
 The bundle contains the Rust binary, the original icon, and a purpose-built FFmpeg with only the containers, codecs, and filters the app uses. CI fails the build if the application exceeds 45 MB or the ZIP exceeds 18 MB.
+
+## Settings
+
+![Settings window](docs/assets/fotogramma-settings.png)
+
+Open **Impostazioni** from the header. Changes apply immediately and are remembered:
+
+- **Accepted codecs:** H.265, AV1, H.264, VP9. Files with an accepted codec count as already compatible. Unreadable files always stay errors, and a conversion is always verified as HEVC.
+- **Replace the original by default:** pre-selects the verified replacement in the conversion dialog.
+- **Profile and container:** the preset and `mkv`/`mp4` pre-selected for new conversions.
 
 ## Conversion presets
 
@@ -51,7 +65,7 @@ The default output is a new `.h265.mkv` or `.h265.mp4` file with a numeric suffi
 
 ## Verified original replacement
 
-**Replace originals only after full validation** is an explicit, disabled-by-default option. When enabled, Fotogramma writes a `.partial` file next to the original and replaces it only after all checks pass:
+**Replace originals only after full validation** is an explicit option, disabled unless you turn it on in the conversion dialog or make it the default in Settings. When enabled, Fotogramma writes a `.partial` file next to the original and replaces it only after all checks pass:
 
 1. Output codec is HEVC.
 2. Duration matches within 1% or 1 second.
@@ -98,12 +112,13 @@ The application looks for the media tools in the executable folder, `bin/` besid
 
 ## Usage
 
-1. Choose a folder with **Browse** or enter its path.
-2. Click **Analyze library**.
+1. Choose a folder with **Sfoglia** (Browse) or enter its path.
+2. Click **Analizza libreria** (Analyze library).
 3. Use statistics and filters to narrow down candidates.
 4. Select one or more videos to reveal available actions.
 5. Click a column header to sort and double-click a video for details.
 6. Convert directly or export the list for another tool.
+7. Adjust the accepted codecs and conversion defaults in **Impostazioni**.
 
 The last directory, window size, and your settings are saved in `settings.toml` under the platform configuration folder. Scan results are never persisted.
 
@@ -111,9 +126,10 @@ The last directory, window size, and your settings are saved in `settings.toml` 
 
 ```bash
 cargo test --workspace
+cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-The suite covers discovery, probing, classification, presets, FFmpeg arguments, output allocation, duration/stream/full-decode validation, atomic replacement and backup restoration, settings, the virtualized table, and four `egui_kittest` snapshots (main window and conversion dialog at 1280×820 and 1050×680).
+The suite covers discovery, probing, classification, presets, FFmpeg arguments, output allocation, duration/stream/full-decode validation, atomic replacement and backup restoration, settings, the virtualized table, codec re-classification, and four `egui_kittest` snapshots (main window and conversion dialog at 1280×820 and 1050×680).
 
 Two optional end-to-end tests convert a generated clip and verify atomic replacement with real FFmpeg binaries. They use the system tools by default, or the packaged minimal tools when `FOTOGRAMMA_FFMPEG_DIR` is set:
 
@@ -137,7 +153,7 @@ See [`deployment/README.md`](deployment/README.md) for Windows, vendoring rules,
 
 ![Build & Release](https://github.com/JohnnyTaxs/fotogramma/actions/workflows/build-release.yml/badge.svg)
 
-The GitHub Actions workflow in `.github/workflows/build-release.yml` runs tests, builds the minimal FFmpeg, packages the app, and enforces the size budget on **Linux, Windows, and macOS ARM**. macOS Intel is intentionally excluded. On every `v*` tag it publishes or updates a GitHub release containing all portable ZIP files.
+The GitHub Actions workflow in `.github/workflows/build-release.yml` runs clippy and the tests, builds the minimal FFmpeg, packages the app, and enforces the size budget on **Linux, Windows, and macOS ARM**. macOS Intel is intentionally excluded. On every `v*` tag it publishes or updates a GitHub release containing all portable ZIP files.
 
 Runner and token details are documented in [CI/CD with GitHub Actions](docs/CICD.md).
 

@@ -31,6 +31,7 @@ python3 deployment/build_rust.py
 
 # Static checks
 cargo check --workspace && cargo fmt --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
 git diff --check
 ```
 
@@ -109,6 +110,6 @@ Do not add macOS Intel or Forgejo-specific runner configuration. Never print `GI
 4. Five fixtures are scanned: two convert, two compatible, one error.
 5. A short H.264 is converted and verified as `hevc` without modifying the original; replacement is tested with a temporary copy.
 6. The moved macOS bundle starts with `PATH=/usr/bin:/bin`, scans, converts, and shuts down.
-7. `cargo fmt --check`, `cargo check --workspace`, and `git diff --check` pass.
+7. `cargo fmt --check`, `cargo check --workspace`, `cargo clippy ... -D warnings`, and `git diff --check` pass.
 8. README, `docs/`, and this guide are updated if architecture or commands change.
 9. The size budget passes; report the measured app and ZIP sizes.

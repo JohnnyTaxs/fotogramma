@@ -48,7 +48,7 @@ pub struct ConversionPlan {
 pub enum DialogOutcome {
     None,
     Cancel,
-    Start(ConversionPlan),
+    Start(Box<ConversionPlan>),
 }
 
 impl ConversionDialog {
@@ -184,7 +184,7 @@ impl ConversionDialog {
                 Path::new(self.destination.trim()),
                 &self.container,
             )
-            .unwrap_or_else(|error| PathBuf::from(error))
+            .unwrap_or_else(PathBuf::from)
         };
         let profile = self.current_profile();
         let args = build_ffmpeg_args(&profile, &first.path, &destination);
@@ -195,6 +195,253 @@ impl ConversionDialog {
             .map(|argument| quote(argument))
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// The scrollable body: profile, destination, replacement, and command preview.
+    fn form(&mut self, ui: &mut egui::Ui) {
+        let custom = self.profile_key == "custom";
+        let mut selected_profile = self.profile_key.clone();
+        egui::Grid::new("conversion-form")
+            .num_columns(2)
+            .spacing([18.0, 4.0])
+            .show(ui, |ui| {
+                let profile_label = ui.label("Profilo");
+                let profiles = builtin_profiles();
+                let selected_label = profiles
+                    .iter()
+                    .find(|profile| profile.key == self.profile_key)
+                    .map(|profile| profile.label.clone())
+                    .unwrap_or_else(|| "Personalizzato".to_string());
+                egui::ComboBox::from_id_salt("profile-combo")
+                    .width(360.0)
+                    .selected_text(selected_label)
+                    .show_ui(ui, |ui| {
+                        for profile in &profiles {
+                            ui.selectable_value(
+                                &mut selected_profile,
+                                profile.key.clone(),
+                                profile.label.clone(),
+                            );
+                        }
+                        ui.selectable_value(
+                            &mut selected_profile,
+                            "custom".to_string(),
+                            "Personalizzato",
+                        );
+                    })
+                    .response
+                    .labelled_by(profile_label.id);
+                ui.end_row();
+
+                let crf_label = ui.label("CRF · qualità");
+                ui.add_enabled_ui(custom, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().slider_width = 300.0;
+                        ui.add(egui::Slider::new(&mut self.crf, 16..=35).show_value(false))
+                            .labelled_by(crf_label.id);
+                        ui.add(
+                            egui::DragValue::new(&mut self.crf)
+                                .range(16..=35)
+                                .speed(0.2),
+                        )
+                        .labelled_by(crf_label.id);
+                    });
+                });
+                ui.end_row();
+
+                let preset_label = ui.label("Preset · velocità");
+                ui.add_enabled_ui(custom, |ui| {
+                    egui::ComboBox::from_id_salt("preset-combo")
+                        .width(360.0)
+                        .selected_text(&self.preset)
+                        .show_ui(ui, |ui| {
+                            for preset in PRESETS {
+                                ui.selectable_value(&mut self.preset, preset.to_string(), preset);
+                            }
+                        })
+                        .response
+                        .labelled_by(preset_label.id);
+                });
+                ui.end_row();
+
+                let pixel_field = ui.label("Formato pixel");
+                ui.add_enabled_ui(custom, |ui| {
+                    egui::ComboBox::from_id_salt("pixel-combo")
+                        .width(360.0)
+                        .selected_text(pixel_label(&self.pixel))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.pixel,
+                                "yuv420p10le".to_string(),
+                                "10-bit · banding ridotto",
+                            );
+                            ui.selectable_value(
+                                &mut self.pixel,
+                                "yuv420p".to_string(),
+                                "8-bit · massima compatibilità",
+                            );
+                        })
+                        .response
+                        .labelled_by(pixel_field.id);
+                });
+                ui.end_row();
+
+                let tune_field = ui.label("Ottimizzazione contenuto");
+                ui.add_enabled_ui(custom, |ui| {
+                    egui::ComboBox::from_id_salt("tune-combo")
+                        .width(360.0)
+                        .selected_text(tune_label(&self.tune))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.tune, String::new(), "Nessuno");
+                            ui.selectable_value(
+                                &mut self.tune,
+                                "animation".to_string(),
+                                "Animation",
+                            );
+                            ui.selectable_value(&mut self.tune, "film".to_string(), "Film");
+                            ui.selectable_value(&mut self.tune, "grain".to_string(), "Grain");
+                        })
+                        .response
+                        .labelled_by(tune_field.id);
+                });
+                ui.end_row();
+
+                let aq_label = ui.label("Quantizzazione adattiva");
+                ui.add_enabled_ui(custom, |ui| {
+                    egui::ComboBox::from_id_salt("aq-combo")
+                        .width(360.0)
+                        .selected_text(match self.aq {
+                            None => "Automatico".to_string(),
+                            Some(value) => format!("AQ mode {value}"),
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.aq, None, "Automatico");
+                            for value in 0..=3u8 {
+                                ui.selectable_value(
+                                    &mut self.aq,
+                                    Some(value),
+                                    format!("AQ mode {value}"),
+                                );
+                            }
+                        })
+                        .response
+                        .labelled_by(aq_label.id);
+                });
+                ui.end_row();
+
+                let audio_label = ui.label("Audio");
+                egui::ComboBox::from_id_salt("audio-combo")
+                    .width(360.0)
+                    .selected_text(AUDIO_OPTIONS[self.audio_index].0)
+                    .show_ui(ui, |ui| {
+                        for (index, (label, _)) in AUDIO_OPTIONS.iter().enumerate() {
+                            ui.selectable_value(&mut self.audio_index, index, *label);
+                        }
+                    })
+                    .response
+                    .labelled_by(audio_label.id);
+                ui.end_row();
+
+                let container_field = ui.label("Contenitore");
+                ui.add_enabled_ui(!self.replace_original, |ui| {
+                    egui::ComboBox::from_id_salt("container-combo")
+                        .width(360.0)
+                        .selected_text(container_label(&self.container))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.container,
+                                "mkv".to_string(),
+                                "MKV · consigliato",
+                            );
+                            ui.selectable_value(
+                                &mut self.container,
+                                "mp4".to_string(),
+                                "MP4 · faststart",
+                            );
+                        })
+                        .response
+                        .labelled_by(container_field.id);
+                });
+                ui.end_row();
+            });
+
+        if selected_profile != self.profile_key {
+            self.profile_key = selected_profile;
+            self.apply_profile();
+        }
+
+        let description = if self.profile_key == "custom" {
+            "Configura manualmente i parametri video. Audio e contenitore restano modificabili in ogni profilo.".to_string()
+        } else {
+            builtin_profile(&self.profile_key)
+                .map(|profile| profile.description)
+                .unwrap_or_default()
+        };
+        ui.label(RichText::new(description).small().color(theme::MUTED));
+        ui.add_space(4.0);
+
+        ui.group(|ui| {
+            ui.set_min_width(ui.available_width());
+            let destination_field = ui.label(
+                RichText::new(if self.replace_original {
+                    "Sostituzione solo dopo test completi"
+                } else {
+                    "Destinazione · mai sovrascrivere"
+                })
+                .strong(),
+            );
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(!self.replace_original, |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.destination)
+                            .desired_width(f32::INFINITY),
+                    )
+                    .labelled_by(destination_field.id);
+                });
+                if ui
+                    .add_enabled(!self.replace_original, theme::secondary_button("Scegli…"))
+                    .clicked()
+                {
+                    if let Some(selected) = rfd::FileDialog::new()
+                        .set_directory(destination_start(&self.destination))
+                        .pick_folder()
+                    {
+                        self.destination = selected.to_string_lossy().into_owned();
+                    }
+                }
+            });
+        });
+
+        ui.checkbox(
+                        &mut self.replace_original,
+                        "Sostituisci gli originali solo dopo verifica completa",
+                    )
+                    .on_hover_text(
+                        "Scrive prima un file temporaneo, esegue tutti i test e solo dopo sostituisce l’originale con backup di sicurezza",
+                    );
+        if self.replace_original {
+            if let Some(first) = self.videos.first() {
+                let extension = first
+                    .path
+                    .extension()
+                    .map(|value| value.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+                if extension == "mkv" || extension == "mp4" {
+                    self.container = extension;
+                }
+            }
+        }
+
+        ui.add_space(4.0);
+        ui.label(RichText::new("Anteprima del comando FFmpeg").strong());
+        let mut preview = self.preview();
+        ui.add(
+            egui::TextEdit::multiline(&mut preview)
+                .font(theme::mono(11.0))
+                .desired_width(f32::INFINITY)
+                .desired_rows(3)
+                .interactive(false),
+        );
     }
 
     pub fn show(&mut self, ctx: &egui::Context) -> DialogOutcome {
@@ -237,270 +484,7 @@ impl ConversionDialog {
                 egui::ScrollArea::vertical()
                     .max_height(max_scroll)
                     .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                    let custom = self.profile_key == "custom";
-                    let mut selected_profile = self.profile_key.clone();
-                    egui::Grid::new("conversion-form")
-                        .num_columns(2)
-                        .spacing([18.0, 4.0])
-                        .show(ui, |ui| {
-                            let profile_label = ui.label("Profilo");
-                            let profiles = builtin_profiles();
-                            let selected_label = profiles
-                                .iter()
-                                .find(|profile| profile.key == self.profile_key)
-                                .map(|profile| profile.label.clone())
-                                .unwrap_or_else(|| "Personalizzato".to_string());
-                            egui::ComboBox::from_id_salt("profile-combo")
-                                .width(360.0)
-                                .selected_text(selected_label)
-                                .show_ui(ui, |ui| {
-                                    for profile in &profiles {
-                                        ui.selectable_value(
-                                            &mut selected_profile,
-                                            profile.key.clone(),
-                                            profile.label.clone(),
-                                        );
-                                    }
-                                    ui.selectable_value(
-                                        &mut selected_profile,
-                                        "custom".to_string(),
-                                        "Personalizzato",
-                                    );
-                                })
-                                .response
-                                .labelled_by(profile_label.id);
-                            ui.end_row();
-
-                            let crf_label = ui.label("CRF · qualità");
-                            ui.add_enabled_ui(custom, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().slider_width = 300.0;
-                                    ui.add(
-                                        egui::Slider::new(&mut self.crf, 16..=35).show_value(false),
-                                    )
-                                    .labelled_by(crf_label.id);
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.crf)
-                                            .range(16..=35)
-                                            .speed(0.2),
-                                    )
-                                    .labelled_by(crf_label.id);
-                                });
-                            });
-                            ui.end_row();
-
-                            let preset_label = ui.label("Preset · velocità");
-                            ui.add_enabled_ui(custom, |ui| {
-                                egui::ComboBox::from_id_salt("preset-combo")
-                                    .width(360.0)
-                                    .selected_text(&self.preset)
-                                    .show_ui(ui, |ui| {
-                                        for preset in PRESETS {
-                                            ui.selectable_value(
-                                                &mut self.preset,
-                                                preset.to_string(),
-                                                preset,
-                                            );
-                                        }
-                                    })
-                                    .response
-                                    .labelled_by(preset_label.id);
-                            });
-                            ui.end_row();
-
-                            let pixel_field = ui.label("Formato pixel");
-                            ui.add_enabled_ui(custom, |ui| {
-                                egui::ComboBox::from_id_salt("pixel-combo")
-                                    .width(360.0)
-                                    .selected_text(pixel_label(&self.pixel))
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut self.pixel,
-                                            "yuv420p10le".to_string(),
-                                            "10-bit · banding ridotto",
-                                        );
-                                        ui.selectable_value(
-                                            &mut self.pixel,
-                                            "yuv420p".to_string(),
-                                            "8-bit · massima compatibilità",
-                                        );
-                                    })
-                                    .response
-                                    .labelled_by(pixel_field.id);
-                            });
-                            ui.end_row();
-
-                            let tune_field = ui.label("Ottimizzazione contenuto");
-                            ui.add_enabled_ui(custom, |ui| {
-                                egui::ComboBox::from_id_salt("tune-combo")
-                                    .width(360.0)
-                                    .selected_text(tune_label(&self.tune))
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut self.tune,
-                                            String::new(),
-                                            "Nessuno",
-                                        );
-                                        ui.selectable_value(
-                                            &mut self.tune,
-                                            "animation".to_string(),
-                                            "Animation",
-                                        );
-                                        ui.selectable_value(
-                                            &mut self.tune,
-                                            "film".to_string(),
-                                            "Film",
-                                        );
-                                        ui.selectable_value(
-                                            &mut self.tune,
-                                            "grain".to_string(),
-                                            "Grain",
-                                        );
-                                    })
-                                    .response
-                                    .labelled_by(tune_field.id);
-                            });
-                            ui.end_row();
-
-                            let aq_label = ui.label("Quantizzazione adattiva");
-                            ui.add_enabled_ui(custom, |ui| {
-                                egui::ComboBox::from_id_salt("aq-combo")
-                                    .width(360.0)
-                                    .selected_text(match self.aq {
-                                        None => "Automatico".to_string(),
-                                        Some(value) => format!("AQ mode {value}"),
-                                    })
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(&mut self.aq, None, "Automatico");
-                                        for value in 0..=3u8 {
-                                            ui.selectable_value(
-                                                &mut self.aq,
-                                                Some(value),
-                                                format!("AQ mode {value}"),
-                                            );
-                                        }
-                                    })
-                                    .response
-                                    .labelled_by(aq_label.id);
-                            });
-                            ui.end_row();
-
-                            let audio_label = ui.label("Audio");
-                            egui::ComboBox::from_id_salt("audio-combo")
-                                .width(360.0)
-                                .selected_text(AUDIO_OPTIONS[self.audio_index].0)
-                                .show_ui(ui, |ui| {
-                                    for (index, (label, _)) in AUDIO_OPTIONS.iter().enumerate() {
-                                        ui.selectable_value(&mut self.audio_index, index, *label);
-                                    }
-                                })
-                                .response
-                                .labelled_by(audio_label.id);
-                            ui.end_row();
-
-                            let container_field = ui.label("Contenitore");
-                            ui.add_enabled_ui(!self.replace_original, |ui| {
-                                egui::ComboBox::from_id_salt("container-combo")
-                                    .width(360.0)
-                                    .selected_text(container_label(&self.container))
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut self.container,
-                                            "mkv".to_string(),
-                                            "MKV · consigliato",
-                                        );
-                                        ui.selectable_value(
-                                            &mut self.container,
-                                            "mp4".to_string(),
-                                            "MP4 · faststart",
-                                        );
-                                    })
-                                    .response
-                                    .labelled_by(container_field.id);
-                            });
-                            ui.end_row();
-                        });
-
-                    if selected_profile != self.profile_key {
-                        self.profile_key = selected_profile;
-                        self.apply_profile();
-                    }
-
-                    let description = if self.profile_key == "custom" {
-                        "Configura manualmente i parametri video. Audio e contenitore restano modificabili in ogni profilo.".to_string()
-                    } else {
-                        builtin_profile(&self.profile_key)
-                            .map(|profile| profile.description)
-                            .unwrap_or_default()
-                    };
-                    ui.label(RichText::new(description).small().color(theme::MUTED));
-                    ui.add_space(4.0);
-
-                    ui.group(|ui| {
-                        ui.set_min_width(ui.available_width());
-                        let destination_field = ui.label(
-                            RichText::new(if self.replace_original {
-                                "Sostituzione solo dopo test completi"
-                            } else {
-                                "Destinazione · mai sovrascrivere"
-                            })
-                            .strong(),
-                        );
-                        ui.horizontal(|ui| {
-                            ui.add_enabled_ui(!self.replace_original, |ui| {
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.destination)
-                                        .desired_width(f32::INFINITY),
-                                )
-                                .labelled_by(destination_field.id);
-                            });
-                            if ui
-                                .add_enabled(!self.replace_original, theme::secondary_button("Scegli…"))
-                                .clicked()
-                            {
-                                if let Some(selected) = rfd::FileDialog::new()
-                                    .set_directory(destination_start(&self.destination))
-                                    .pick_folder()
-                                {
-                                    self.destination = selected.to_string_lossy().into_owned();
-                                }
-                            }
-                        });
-                    });
-
-                    ui.checkbox(
-                        &mut self.replace_original,
-                        "Sostituisci gli originali solo dopo verifica completa",
-                    )
-                    .on_hover_text(
-                        "Scrive prima un file temporaneo, esegue tutti i test e solo dopo sostituisce l’originale con backup di sicurezza",
-                    );
-                    if self.replace_original {
-                        if let Some(first) = self.videos.first() {
-                            let extension = first
-                                .path
-                                .extension()
-                                .map(|value| value.to_string_lossy().to_lowercase())
-                                .unwrap_or_default();
-                            if extension == "mkv" || extension == "mp4" {
-                                self.container = extension;
-                            }
-                        }
-                    }
-
-                    ui.add_space(4.0);
-                    ui.label(RichText::new("Anteprima del comando FFmpeg").strong());
-                    let mut preview = self.preview();
-                    ui.add(
-                        egui::TextEdit::multiline(&mut preview)
-                            .font(theme::mono(11.0))
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(3)
-                            .interactive(false),
-                    );
-
-                    });
+                    .show(ui, |ui| self.form(ui));
 
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
@@ -514,7 +498,7 @@ impl ConversionDialog {
                             .clicked()
                         {
                             if let Ok(plan) = self.plan() {
-                                outcome = DialogOutcome::Start(plan);
+                                outcome = DialogOutcome::Start(Box::new(plan));
                             }
                         }
                         if ui.add(theme::secondary_button("Annulla")).clicked() {
@@ -524,10 +508,8 @@ impl ConversionDialog {
                 });
             });
 
-        if modal.should_close() {
-            if matches!(outcome, DialogOutcome::None) {
-                outcome = DialogOutcome::Cancel;
-            }
+        if modal.should_close() && matches!(outcome, DialogOutcome::None) {
+            outcome = DialogOutcome::Cancel;
         }
         outcome
     }
@@ -781,10 +763,11 @@ pub fn show_progress(ctx: &egui::Context, session: &mut ConversionSession) -> Pr
                 });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if session.finished && session.successes() > 0 {
-                    if ui.add(theme::secondary_button("Apri cartella")).clicked() {
-                        action = ProgressAction::OpenFolder;
-                    }
+                if session.finished
+                    && session.successes() > 0
+                    && ui.add(theme::secondary_button("Apri cartella")).clicked()
+                {
+                    action = ProgressAction::OpenFolder;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if session.finished {

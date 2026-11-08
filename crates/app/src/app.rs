@@ -296,7 +296,7 @@ impl FotogrammaApp {
             match dialog.show(ctx) {
                 DialogOutcome::Start(plan) => {
                     self.conversion_dialog = None;
-                    self.start_conversion(plan, ctx);
+                    self.start_conversion(*plan, ctx);
                 }
                 DialogOutcome::Cancel => {
                     self.conversion_dialog = None;

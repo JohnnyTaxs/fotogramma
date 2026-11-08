@@ -281,4 +281,29 @@ mod tests {
         let base = video(Path::new("/videos/one.mkv"));
         assert!(base.duration.unwrap() * 0.01 < 1.0);
     }
+
+    #[test]
+    fn replacing_a_path_without_a_file_name_is_refused() {
+        let (replaced, message) =
+            replace_verified_output(Path::new("/"), Path::new("/tmp/x"), Path::new("/missing"));
+        assert!(!replaced);
+        assert!(message.contains("Percorso originale non valido"));
+    }
+
+    #[test]
+    fn validation_fails_when_the_output_cannot_be_probed() {
+        let directory = std::env::temp_dir().join(format!("foto-validate-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        let output = directory.join("one.h265.partial.mkv");
+        fs::write(&output, b"not a video").unwrap();
+        let (valid, _) = validate_conversion_output(
+            &video(&directory.join("one.mkv")),
+            &output,
+            Path::new("/missing/ffprobe"),
+            Path::new("/missing/ffmpeg"),
+        );
+        assert!(!valid);
+        let _ = fs::remove_dir_all(&directory);
+    }
 }
