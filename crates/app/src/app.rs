@@ -2224,6 +2224,10 @@ mod small_snapshot_tests {
 
     #[test]
     fn japanese_file_names_are_drawn_once_a_system_font_is_found() {
+        if !theme::cjk_font_available() {
+            eprintln!("skipped: no system font for Japanese on this machine");
+            return;
+        }
         let _lang = lang_guard();
         let mut harness = egui_kittest::Harness::builder()
             .with_size(egui::vec2(1050.0, 680.0))
@@ -2245,10 +2249,6 @@ mod small_snapshot_tests {
                 app.query = "進撃".to_string();
                 app
             });
-        if !theme::cjk_loaded() {
-            eprintln!("skipped: no system font for Japanese on this machine");
-            return;
-        }
         // The test harness panics on a glyph nothing can draw, so reaching the
         // end proves every character of the names has a font.
         harness.run();

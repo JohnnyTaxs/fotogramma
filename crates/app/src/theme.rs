@@ -178,7 +178,6 @@ static BASE_FONTS: Mutex<Option<FontDefinitions>> = Mutex::new(None);
 /// A font for each script is looked for once, found or not.
 static CJK_TRIED: AtomicBool = AtomicBool::new(false);
 static HANGUL_TRIED: AtomicBool = AtomicBool::new(false);
-static CJK_FOUND: AtomicBool = AtomicBool::new(false);
 
 const CJK_FONTS: &[&str] = &[
     "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
@@ -204,10 +203,12 @@ const HANGUL_FONTS: &[&str] = &[
     "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
 ];
 
-/// Whether a font for Japanese and Chinese names has been found and loaded.
+/// Whether this machine has a font for Japanese and Chinese names at all. The
+/// test harness panics on a glyph nothing can draw, so a test that draws such
+/// names has to know before it builds the window.
 #[cfg(test)]
-pub fn cjk_loaded() -> bool {
-    CJK_FOUND.load(Ordering::Relaxed)
+pub fn cjk_font_available() -> bool {
+    first_font(CJK_FONTS).is_some()
 }
 
 /// `(needs a CJK font, needs a Hangul font)` for a piece of text.
@@ -279,9 +280,6 @@ pub fn ensure_fallback_fonts<'a>(
                     .push(name.to_string());
             }
             changed = true;
-            if name == "system-cjk" {
-                CJK_FOUND.store(true, Ordering::Relaxed);
-            }
         }
     }
     if changed {
