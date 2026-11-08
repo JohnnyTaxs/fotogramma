@@ -200,11 +200,27 @@ def verify_macos_archive(artifact: Path, archive: Path) -> None:
                 raise RuntimeError(f"Archive is missing {relative}")
 
 
+def report_largest(artifact: Path, count: int = 12) -> None:
+    """Show what dominates the bundle, so a budget failure is actionable."""
+    files = sorted(
+        (
+            (item.stat().st_size, item)
+            for item in artifact.rglob("*")
+            if item.is_file()
+        ),
+        reverse=True,
+    )
+    print(f"Bundle contents ({len(files)} files):")
+    for size, item in files[:count]:
+        print(f"  {size / 1_000_000:6.2f} MB  {item.relative_to(artifact)}")
+
+
 def enforce_budget(artifact: Path, archive: Path) -> None:
     app_bytes = directory_size(artifact)
     zip_bytes = archive.stat().st_size
     print(f"App: {app_bytes / 1_000_000:.1f} MB (budget {MAX_APP_BYTES / 1_000_000:.0f} MB)")
     print(f"ZIP: {zip_bytes / 1_000_000:.1f} MB (budget {MAX_ZIP_BYTES / 1_000_000:.0f} MB)")
+    report_largest(artifact)
     if app_bytes > MAX_APP_BYTES:
         raise RuntimeError("Application exceeds the size budget")
     if zip_bytes > MAX_ZIP_BYTES:
