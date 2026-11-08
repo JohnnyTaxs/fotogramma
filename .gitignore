@@ -1,10 +1,7 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
-build/
+target/
 dist/
 deployment/vendor/
 fotogramma-da-convertire.txt
 .DS_Store
-rust/target/
+__pycache__/
+*.py[cod]

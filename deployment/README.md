@@ -1,7 +1,5 @@
 # Native build and distribution
 
-The directory is named `deployment/` rather than `packaging/` to avoid a conflict with the Python `packaging` package that the 1.x build still uses.
-
 ## Requirements
 
 - A stable Rust toolchain (`cargo`, `rustc`);
@@ -65,7 +63,7 @@ python3 deployment/build_rust.py
 
 The script:
 
-1. reads the version from `rust/Cargo.toml` (or `FOTOGRAMMA_VERSION`);
+1. reads the version from `Cargo.toml` (or `FOTOGRAMMA_VERSION`);
 2. runs `cargo build --release --locked -p fotogramma`;
 3. assembles the platform bundle;
 4. creates `dist/Fotogramma-<System>-<arch>.zip`;

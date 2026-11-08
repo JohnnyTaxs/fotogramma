@@ -1,6 +1,6 @@
 # CI/CD with GitHub Actions
 
-The workflow `.github/workflows/build-release.yml` runs on every push to `main` or `rust-rewrite`, pull request, `v*` tag, and manual dispatch.
+The workflow `.github/workflows/build-release.yml` runs on every push to `main`, pull request, `v*` tag, and manual dispatch.
 
 ## Platforms
 
@@ -42,7 +42,7 @@ Never print `GITHUB_TOKEN` or `FORGEJO_TOKEN`.
 
 ```bash
 # Tests
-cd rust && cargo test --workspace --locked
+cargo test --workspace --locked
 
 # Minimal FFmpeg + package (macOS/Linux)
 deployment/ffmpeg/build_minimal.sh

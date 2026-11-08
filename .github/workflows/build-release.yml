@@ -2,7 +2,7 @@ name: Build & Release
 
 on:
   push:
-    branches: [main, rust-rewrite]
+    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -29,7 +29,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust
+          workspaces: .
 
       - name: Install build dependencies
         run: |
@@ -45,11 +45,9 @@ jobs:
         run: deployment/ffmpeg/build_minimal.sh
 
       - name: Run tests
-        working-directory: rust
         run: cargo test --workspace --locked
 
       - name: Verify the packaged media toolchain
-        working-directory: rust
         env:
           FOTOGRAMMA_FFMPEG_DIR: ${{ github.workspace }}/deployment/vendor/rust/Linux-x86_64/bin
         run: cargo test -p fotogramma-core --test conversion_pipeline --locked
@@ -66,17 +64,17 @@ jobs:
             -f rawvideo -pixel_format yuv420p -video_size 64x64 -framerate 5 \
             -i /tmp/fotogramma-media/source.yuv -c:v mpeg4 \
             /tmp/fotogramma-media/clip.mp4
-          cargo build --release --locked -p fotogramma-core --example scan --manifest-path rust/Cargo.toml
+          cargo build --release --locked -p fotogramma-core --example scan
           env -i PATH=/usr/bin:/bin \
             FOTOGRAMMA_FFMPEG_DIR="$PWD/dist/Fotogramma/bin" \
-            rust/target/release/examples/scan /tmp/fotogramma-media
+            target/release/examples/scan /tmp/fotogramma-media
 
       - name: Upload snapshot failures
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: snapshots-linux
-          path: rust/crates/app/tests/snapshots/*.png
+          path: crates/app/tests/snapshots/*.png
           if-no-files-found: ignore
           retention-days: 3
 
@@ -101,7 +99,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust
+          workspaces: .
 
       - name: Install FFmpeg dependencies
         run: brew install x265 pkgconf
@@ -110,11 +108,9 @@ jobs:
         run: deployment/ffmpeg/build_minimal.sh
 
       - name: Run tests
-        working-directory: rust
         run: cargo test --workspace --locked
 
       - name: Verify the packaged media toolchain
-        working-directory: rust
         env:
           FOTOGRAMMA_FFMPEG_DIR: ${{ github.workspace }}/deployment/vendor/rust/Darwin-arm64/bin
         run: cargo test -p fotogramma-core --test conversion_pipeline --locked
@@ -131,17 +127,17 @@ jobs:
             -f rawvideo -pixel_format yuv420p -video_size 64x64 -framerate 5 \
             -i /tmp/fotogramma-media/source.yuv -c:v mpeg4 \
             /tmp/fotogramma-media/clip.mp4
-          cargo build --release --locked -p fotogramma-core --example scan --manifest-path rust/Cargo.toml
+          cargo build --release --locked -p fotogramma-core --example scan
           env -i PATH=/usr/bin:/bin HOME="$HOME" \
             FOTOGRAMMA_FFMPEG_DIR="$PWD/dist/Fotogramma.app/Contents/Resources/bin" \
-            rust/target/release/examples/scan /tmp/fotogramma-media
+            target/release/examples/scan /tmp/fotogramma-media
 
       - name: Upload snapshot failures
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: snapshots-macos
-          path: rust/crates/app/tests/snapshots/*.png
+          path: crates/app/tests/snapshots/*.png
           if-no-files-found: ignore
           retention-days: 3
 
@@ -166,7 +162,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust
+          workspaces: .
 
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
@@ -187,7 +183,6 @@ jobs:
         run: deployment/ffmpeg/build_minimal_windows.sh
 
       - name: Run tests
-        working-directory: rust
         run: cargo test --workspace --locked
 
       - name: Build portable app
@@ -198,7 +193,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: snapshots-windows
-          path: rust/crates/app/tests/snapshots/*.png
+          path: crates/app/tests/snapshots/*.png
           if-no-files-found: ignore
           retention-days: 3
 

@@ -24,7 +24,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RUST = ROOT / "rust"
+RUST = ROOT
 DIST = ROOT / "dist"
 SYSTEM = platform.system()
 MACHINE = platform.machine().lower()
@@ -39,7 +39,7 @@ def workspace_version() -> str:
     text = (RUST / "Cargo.toml").read_text(encoding="utf-8")
     match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
     if not match:
-        raise RuntimeError("Cannot read the workspace version from rust/Cargo.toml")
+        raise RuntimeError("Cannot read the workspace version from Cargo.toml")
     override = os.environ.get("FOTOGRAMMA_VERSION", "").strip()
     return override.lstrip("v") if override else match.group(1)
 

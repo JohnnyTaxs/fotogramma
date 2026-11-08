@@ -17,15 +17,12 @@ Operational guide for agents modifying **Fotogramma Desktop** (v2, Rust). The we
 
 ```bash
 # Run from source (requires ffmpeg/ffprobe on PATH or FOTOGRAMMA_FFMPEG_DIR)
-cd rust
 cargo run --release -p fotogramma
 
 # Full test suite
-cd rust
 cargo test --workspace
 
 # Update the four egui_kittest snapshots after an intentional layout change
-cd rust
 UPDATE_SNAPSHOTS=1 cargo test -p fotogramma snapshot
 
 # Minimal FFmpeg (macOS/Linux), then package and enforce the size budget
@@ -33,7 +30,7 @@ deployment/ffmpeg/build_minimal.sh
 python3 deployment/build_rust.py
 
 # Static checks
-cd rust && cargo check --workspace && cargo fmt --check
+cargo check --workspace && cargo fmt --check
 git diff --check
 ```
 
@@ -45,18 +42,18 @@ Linux and Windows build x265 with `deployment/ffmpeg/build_x265.sh` (8-bit + 10-
 
 | File | Rules |
 | --- | --- |
-| `rust/crates/core/src/scanner.rs` | Discovery, `Popen`-equivalent probing, classification, cancellation. Must remain UI-independent. |
-| `rust/crates/core/src/media_tools.rs` | ffmpeg/ffprobe resolution in source and packaged builds; `DYLD_LIBRARY_PATH` only on macOS. |
-| `rust/crates/core/src/conversion.rs` | Profiles and FFmpeg arguments. Use `-n`, `-map 0`, and non-overwriting output. |
-| `rust/crates/core/src/verification.rs` | Codec/duration/stream validation, full decode, and atomic backup replacement. |
-| `rust/crates/app/src/app.rs` | Entry state, layout, selection, scan flow, smoke test, four snapshots. |
-| `rust/crates/app/src/icon.rs` | Apply the bundled icon to the macOS Dock at startup. |
-| `rust/crates/app/src/table.rs` | Virtualized table, filters, sorting, selection, exact column widths. |
-| `rust/crates/app/src/dialogs.rs` | Conversion settings, command preview, progress, results, close confirmation. |
-| `rust/crates/app/src/worker.rs` | Scan and conversion threads; communicate only through channels. |
-| `rust/crates/app/src/theme.rs` | Cinema Pop colors and embedded Sora/IBM Plex Mono. Do not introduce HTML/CSS or a second theme. |
-| `rust/crates/app/src/settings.rs` | TOML preferences; config directory disabled under `cfg!(test)`. |
-| `rust/crates/app/src/platform.rs` | Open a folder in the system file manager. |
+| `crates/core/src/scanner.rs` | Discovery, `Popen`-equivalent probing, classification, cancellation. Must remain UI-independent. |
+| `crates/core/src/media_tools.rs` | ffmpeg/ffprobe resolution in source and packaged builds; `DYLD_LIBRARY_PATH` only on macOS. |
+| `crates/core/src/conversion.rs` | Profiles and FFmpeg arguments. Use `-n`, `-map 0`, and non-overwriting output. |
+| `crates/core/src/verification.rs` | Codec/duration/stream validation, full decode, and atomic backup replacement. |
+| `crates/app/src/app.rs` | Entry state, layout, selection, scan flow, smoke test, four snapshots. |
+| `crates/app/src/icon.rs` | Apply the bundled icon to the macOS Dock at startup. |
+| `crates/app/src/table.rs` | Virtualized table, filters, sorting, selection, exact column widths. |
+| `crates/app/src/dialogs.rs` | Conversion settings, command preview, progress, results, close confirmation. |
+| `crates/app/src/worker.rs` | Scan and conversion threads; communicate only through channels. |
+| `crates/app/src/theme.rs` | Cinema Pop colors and embedded Sora/IBM Plex Mono. Do not introduce HTML/CSS or a second theme. |
+| `crates/app/src/settings.rs` | TOML preferences; config directory disabled under `cfg!(test)`. |
+| `crates/app/src/platform.rs` | Open a folder in the system file manager. |
 
 Data flow: directory → `discover_videos` → `probe_videos` → `mpsc` → app state → `TableBuilder`.
 
@@ -76,7 +73,7 @@ The table uses `egui_extras::TableBuilder` with virtualized rows, native sorting
 
 ## Snapshots and accessibility
 
-- Four accepted PNGs live in `rust/crates/app/tests/snapshots/`: main window and conversion dialog at 1280×820 and 1050×680.
+- Four accepted PNGs live in `crates/app/tests/snapshots/`: main window and conversion dialog at 1280×820 and 1050×680.
 - `egui_kittest` writes `*.new.png` on mismatch and keeps the previous `*.old.png`; accept deliberately with `UPDATE_SNAPSHOTS=1` and delete the backups.
 - Every interactive control needs an accessible label (`labelled_by`); the accessibility check must pass.
 - `Visuals::strong_text_color()` reuses `widgets.active.fg_stroke`; keep it light or `.strong()` text becomes invisible.
@@ -88,9 +85,9 @@ The table uses `egui_extras::TableBuilder` with virtualized rows, native sorting
 - `deployment/ffmpeg/collect_macos.py` rewrites install names to `@loader_path`, re-signs every Mach-O file, and verifies relocation.
 - `deployment/ffmpeg/collect_linux.py` sets an `$ORIGIN/../lib` runpath with `patchelf`.
 - macOS archives use `ditto -c -k --sequesterRsrc --keepParent`; `deployment/build_rust.py` extracts the ZIP again and runs `codesign --verify --deep --strict` before publishing.
-- The macOS `Info.plist` embeds the version from `rust/Cargo.toml`.
+- The macOS `Info.plist` embeds the version from `Cargo.toml`.
 - Windows embeds the icon and version through `rust/crates/app/build.rs` (`winresource`).
-- Do not commit `rust/target/`, `build/`, `dist/`, `deployment/vendor/`, or screenshots containing real user data.
+- Do not commit `target/`, `build/`, `dist/`, `deployment/vendor/`, or screenshots containing real user data.
 
 ## CI/CD and releases
 

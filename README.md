@@ -2,7 +2,7 @@
 
 Fotogramma is a **native desktop application** for inspecting a video library, identifying files that may benefit from H.265 conversion, and converting videos directly with FFmpeg.
 
-Version 2 is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no browser, WebView, HTTP server, or launcher.
+Version 2 is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no browser, WebView, HTTP server, or launcher. The Python 1.x application has been removed; the repository now contains only the Rust workspace.
 
 ![Fotogramma Desktop](docs/assets/fotogramma-native-results.png)
 
@@ -21,15 +21,15 @@ Version 2 is written in **Rust** with `egui`/`eframe` and renders with OpenGL: n
 
 ## Size
 
-The portable archives are an order of magnitude smaller than the Qt/Python 1.x builds:
+The portable archives are an order of magnitude smaller than the Qt/Python 1.x builds they replaced:
 
 | Platform | Application | ZIP |
 | --- | --- | --- |
-| macOS ARM | 22.4 MB | 10.0 MB |
+| macOS ARM | 22.7 MB | 10.2 MB |
 | Linux x86_64 | 40.3 MB | 13.3 MB |
 | Windows amd64 | 35.4 MB | 11.1 MB |
 
-The macOS build went from 106 MB and a 44 MB ZIP in 1.0.4 to 22.4 MB and 10.0 MB. The Linux and Windows bundles are larger because x265's x86 assembly is about twice the size of the arm64 build, and the C++ runtime travels inside that library instead of as a separate file.
+The macOS build went from 106 MB and a 44 MB ZIP in 1.0.4 to 22.7 MB and 10.2 MB. The Linux and Windows bundles are larger because x265's x86 assembly is about twice the size of the arm64 build, and the C++ runtime travels inside that library instead of as a separate file.
 
 The bundle contains the Rust binary, the original icon, and a purpose-built FFmpeg with only the containers, codecs, and filters the app uses. CI fails the build if the application exceeds 45 MB or the ZIP exceeds 18 MB.
 
@@ -75,7 +75,6 @@ On Windows, run `fotogramma.exe` inside the extracted folder. On Linux, run the 
 Requirements: a stable Rust toolchain plus `ffmpeg` and `ffprobe` on `PATH` (or set `FOTOGRAMMA_FFMPEG_DIR` to the folder that contains them).
 
 ```bash
-cd rust
 cargo run --release -p fotogramma
 ```
 
@@ -110,7 +109,6 @@ The last directory and window size are saved in `settings.toml` under the platfo
 ## Tests
 
 ```bash
-cd rust
 cargo test --workspace
 ```
 
@@ -145,30 +143,29 @@ Runner and token details are documented in [CI/CD with GitHub Actions](docs/CICD
 ## Project structure
 
 ```text
-rust/
-  Cargo.toml               Workspace, release profile
-  crates/core/             UI-free engine
-    src/scanner.rs         Discovery, ffprobe, classification, cancellation
-    src/media_tools.rs     ffmpeg/ffprobe resolution and DYLD environment
-    src/conversion.rs      Presets, FFmpeg arguments, safe output allocation
-    src/verification.rs    Full validation and atomic backup replacement
-    src/formatting.rs      Italian number and size formatting
-  crates/app/              egui/eframe application
-    src/app.rs             Window, layout, scan flow, snapshots
-    src/icon.rs            Application and Dock icon at startup
-    src/table.rs           Virtualized table, filters, sorting, selection
-    src/dialogs.rs         Conversion settings, progress, details, confirmations
-    src/worker.rs          Scan and conversion threads with channels
-    src/theme.rs           Cinema Pop colors, fonts, visuals
-    src/settings.rs        TOML settings (directory and window size only)
-    src/platform.rs        Open folder in the system file manager
+Cargo.toml                 Workspace, release profile
+crates/core/               UI-free engine
+  src/scanner.rs           Discovery, ffprobe, classification, cancellation
+  src/media_tools.rs       ffmpeg/ffprobe resolution and DYLD environment
+  src/conversion.rs        Presets, FFmpeg arguments, safe output allocation
+  src/verification.rs      Full validation and atomic backup replacement
+  src/formatting.rs        Italian number and size formatting
+crates/app/                egui/eframe application
+  src/app.rs               Window, layout, scan flow, snapshots
+  src/icon.rs              Application and Dock icon at startup
+  src/table.rs             Virtualized table, filters, sorting, selection
+  src/dialogs.rs           Conversion settings, progress, details, confirmations
+  src/worker.rs            Scan and conversion threads with channels
+  src/theme.rs             Cinema Pop colors, fonts, visuals
+  src/settings.rs          TOML settings (directory and window size only)
+  src/platform.rs          Open folder in the system file manager
 deployment/
   ffmpeg/                  Minimal FFmpeg build and vendor collectors
   build_rust.py            Packaging, ZIP, signature round-trip, size budget
   create_release.py        GitHub release uploader
   Fotogramma.icns/.ico/.png
 docs/                      Architecture, CI/CD, demo assets, release notes
-static/                    Fonts and licenses
+static/fonts/              Embedded fonts and their licenses
 ```
 
 ## Documentation

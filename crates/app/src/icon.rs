@@ -11,8 +11,7 @@ pub fn install() {
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::NSData;
 
-    const PNG: &[u8] =
-        include_bytes!("../../../../deployment/fotogramma.iconset/icon_256x256@2x.png");
+    const PNG: &[u8] = include_bytes!("../../../deployment/fotogramma.iconset/icon_256x256@2x.png");
 
     let Some(mtm) = MainThreadMarker::new() else {
         return;

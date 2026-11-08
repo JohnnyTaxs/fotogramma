@@ -48,13 +48,13 @@ pub fn install(ctx: &eframe::egui::Context) {
     fonts.font_data.insert(
         "sora".to_string(),
         Arc::new(FontData::from_static(include_bytes!(
-            "../../../../static/fonts/Sora-Variable.ttf"
+            "../../../static/fonts/Sora-Variable.ttf"
         ))),
     );
     fonts.font_data.insert(
         "plex-mono".to_string(),
         Arc::new(FontData::from_static(include_bytes!(
-            "../../../../static/fonts/IBMPlexMono-Regular.ttf"
+            "../../../static/fonts/IBMPlexMono-Regular.ttf"
         ))),
     );
     fonts
