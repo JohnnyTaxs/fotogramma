@@ -24,10 +24,13 @@ Version 2 is written in **Rust** with `egui`/`eframe` and renders with OpenGL: n
 
 The portable archives are an order of magnitude smaller than the Qt/Python 1.x builds:
 
-| Component | 1.0.4 | 2.0.0 |
+| Platform | Application | ZIP |
 | --- | --- | --- |
-| macOS application | 106 MB | 22.4 MB |
-| macOS ZIP | 44 MB | 10.0 MB |
+| macOS ARM | 22.4 MB | 10.0 MB |
+| Linux x86_64 | 40.3 MB | 13.3 MB |
+| Windows amd64 | 35.4 MB | 11.1 MB |
+
+The macOS build went from 106 MB and a 44 MB ZIP in 1.0.4 to 22.4 MB and 10.0 MB. The Linux and Windows bundles are larger because a self-built 8-bit + 10-bit x265 and the glibc-free FFmpeg shared objects are heavier than the single macOS dylib set.
 
 The bundle contains the Rust binary, the original icon, and a purpose-built FFmpeg with only the containers, codecs, and filters the app uses. CI fails the build if the application exceeds 45 MB or the ZIP exceeds 18 MB.
 
