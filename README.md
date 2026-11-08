@@ -35,6 +35,8 @@ The bundle contains the Rust binary, the original icon, and a purpose-built FFmp
 
 ## Conversion presets
 
+![Conversion dialog](docs/assets/fotogramma-conversion-dialog.png)
+
 | Preset | Intended use | Video settings | Default audio |
 | --- | --- | --- | --- |
 | Maximum quality and compression | Best quality/size ratio, even if slow | CRF 20, `veryslow`, AQ mode 3, 10-bit | Original |
@@ -153,6 +155,7 @@ rust/
     src/formatting.rs      Italian number and size formatting
   crates/app/              egui/eframe application
     src/app.rs             Window, layout, scan flow, snapshots
+    src/icon.rs            Application and Dock icon at startup
     src/table.rs           Virtualized table, filters, sorting, selection
     src/dialogs.rs         Conversion settings, progress, details, confirmations
     src/worker.rs          Scan and conversion threads with channels

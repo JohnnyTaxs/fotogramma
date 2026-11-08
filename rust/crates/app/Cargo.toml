@@ -24,6 +24,18 @@ rfd = "0.18"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSImage",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSData",
+] }
+
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winresource = "0.1"
 

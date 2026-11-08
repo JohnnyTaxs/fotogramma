@@ -50,6 +50,7 @@ Linux and Windows build x265 with `deployment/ffmpeg/build_x265.sh` (8-bit + 10-
 | `rust/crates/core/src/conversion.rs` | Profiles and FFmpeg arguments. Use `-n`, `-map 0`, and non-overwriting output. |
 | `rust/crates/core/src/verification.rs` | Codec/duration/stream validation, full decode, and atomic backup replacement. |
 | `rust/crates/app/src/app.rs` | Entry state, layout, selection, scan flow, smoke test, four snapshots. |
+| `rust/crates/app/src/icon.rs` | Apply the bundled icon to the macOS Dock at startup. |
 | `rust/crates/app/src/table.rs` | Virtualized table, filters, sorting, selection, exact column widths. |
 | `rust/crates/app/src/dialogs.rs` | Conversion settings, command preview, progress, results, close confirmation. |
 | `rust/crates/app/src/worker.rs` | Scan and conversion threads; communicate only through channels. |

@@ -1,5 +1,6 @@
 mod app;
 mod dialogs;
+mod icon;
 mod platform;
 mod settings;
 mod table;
@@ -7,6 +8,8 @@ mod theme;
 mod worker;
 
 fn main() -> eframe::Result<()> {
+    icon::install();
+
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 820.0])
