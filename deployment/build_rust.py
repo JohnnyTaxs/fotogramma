@@ -138,7 +138,9 @@ def macos_bundle(binary: Path, version: str) -> Path:
         "CFBundleInfoDictionaryVersion": "6.0",
         "CFBundleShortVersionString": version,
         "CFBundleVersion": version,
-        "LSMinimumSystemVersion": "11.0",
+        # FFmpeg and x265 are built on a macOS 15 runner, so every bundled
+        # binary except the app itself needs macOS 15. Say so instead of 11.
+        "LSMinimumSystemVersion": "15.0",
         "NSHighResolutionCapable": True,
         "NSHumanReadableCopyright": "MIT License",
     }

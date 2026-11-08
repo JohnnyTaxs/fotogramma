@@ -3,6 +3,10 @@
   Fotogramma
 </h1>
 
+[![Latest release](https://img.shields.io/github/v/release/JohnnyTaxs/fotogramma)](https://github.com/JohnnyTaxs/fotogramma/releases/latest)
+[![Build & Release](https://github.com/JohnnyTaxs/fotogramma/actions/workflows/build-release.yml/badge.svg)](https://github.com/JohnnyTaxs/fotogramma/actions/workflows/build-release.yml)
+[![License: MIT](https://img.shields.io/github/license/JohnnyTaxs/fotogramma)](LICENSE)
+
 Fotogramma is a **native desktop application** for inspecting a video library, identifying files that may benefit from H.265 conversion, and converting videos directly with FFmpeg.
 
 It is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no browser, WebView, HTTP server, or launcher. The interface is available in **English and Italian**: it follows the operating system language and can be overridden in Settings. The Python 1.x application has been removed; the repository contains only the Rust workspace.
@@ -101,9 +105,30 @@ The default output is a new `.h265.mkv` or `.h265.mp4` file with a numeric suffi
 
 If any check fails, the original remains unchanged. Replacement uses an atomic rename on the same filesystem and a `.fotogramma-backup` file that is removed only after success. The container must match the original extension (MKV or MP4); WebM replacement is not supported.
 
+## Requirements
+
+| Platform | Package | Needs |
+| --- | --- | --- |
+| macOS | Apple Silicon (arm64) only | **macOS 15 or later.** The bundled FFmpeg and x265 are built on a macOS 15 runner. |
+| Windows | x86-64 | 64-bit Windows 10 or later. |
+| Linux | x86-64 | A recent distribution: the package is built on Ubuntu 24.04, so it needs glibc 2.39 or newer. |
+
+There is no macOS Intel build. Each package carries its own `ffmpeg` and `ffprobe`, so nothing else has to be installed.
+
+## Known limitations
+
+These are choices, not oversights:
+
+- **Software encoding only (x265), no hardware acceleration.** Hardware encoders (VideoToolbox, NVENC, QuickSync, AMF) are much faster but give a worse quality for the same size. Fotogramma is about getting the best H.265 out of a file, so it does not offer them and there is no plan to.
+- **One conversion at a time.** The queue is sequential on purpose: x265 already uses every core, and parallel jobs only saturate the CPU and the disk.
+- **Only the first video stream is analyzed** (`v:0`) of `.mp4`, `.mkv`, and `.webm`. A file with several video streams is classified by its first one; the conversion itself keeps every stream (`-map 0`).
+- **Replacing an original does not work with WebM.** The WebM container only allows VP8, VP9 and AV1 video, so an HEVC result cannot stay a `.webm`: it has to become `.mkv` or `.mp4`. Replacing means swapping the verified result into the original's exact path with a backup, and a different extension would break that guarantee. WebM files can still be converted: the result is a new `.mkv` or `.mp4` next to them, and the original is left alone.
+- **No macOS notarization.** The app is ad-hoc signed but not notarized (that needs a paid Apple developer account), so Gatekeeper asks you to confirm the first launch.
+- **No macOS Intel build,** and the interface is available in Italian and English only.
+
 ## Run the portable app
 
-The portable build includes the Rust application and its own `ffmpeg`/`ffprobe`; no installation is required on the destination computer.
+The portable build includes the Rust application and its own `ffmpeg`/`ffprobe`; no installation is required on the destination computer. The bundled FFmpeg is built with `--enable-gpl` and x265, so the package includes GPL v2 or later code (see [Privacy and license](#privacy-and-license)); Fotogramma's own source stays MIT.
 
 For macOS Apple Silicon, download `Fotogramma-Darwin-arm64.dmg` from the [latest release](https://github.com/JohnnyTaxs/fotogramma/releases/latest), open it, and drag **Fotogramma** onto the **Applications** shortcut. The bundle is ad-hoc signed but not notarized, so Gatekeeper asks for confirmation on first launch: use **System Settings → Privacy & Security → Open Anyway** (on older macOS versions, right-click `Fotogramma.app` → **Open**).
 
@@ -222,6 +247,10 @@ deployment/
 docs/                      Architecture, CI/CD, demo assets, release notes
 static/fonts/              Embedded fonts and their licenses
 ```
+
+## Issues and contributing
+
+This is a personal project, so there is no support promise, but bug reports are welcome on the [issue tracker](https://github.com/JohnnyTaxs/fotogramma/issues). If you want to change the code, [`AGENTS.md`](AGENTS.md) lists the rules the project follows (native desktop only, originals never overwritten by default, both languages for every string, the size budget) and the checks to run before a change.
 
 ## Documentation
 
