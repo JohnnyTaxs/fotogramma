@@ -34,6 +34,7 @@ SYSTEM = platform.system()
 MACHINE = platform.machine().lower()
 VENDOR = ROOT / "deployment" / "vendor" / "rust" / f"{SYSTEM}-{MACHINE}"
 BINARY_NAME = "fotogramma.exe" if SYSTEM == "Windows" else "fotogramma"
+CLI_NAME = "fotogramma-cli.exe" if SYSTEM == "Windows" else "fotogramma-cli"
 MAX_APP_BYTES = int(os.environ.get("FOTOGRAMMA_MAX_APP_BYTES", 45_000_000))
 MAX_ZIP_BYTES = int(os.environ.get("FOTOGRAMMA_MAX_ZIP_BYTES", 18_000_000))
 MAX_DMG_BYTES = int(os.environ.get("FOTOGRAMMA_MAX_DMG_BYTES", 18_000_000))
@@ -61,13 +62,24 @@ def directory_size(path: Path) -> int:
 def cargo_build() -> Path:
     if os.environ.get("FOTOGRAMMA_RUST_SKIP_BUILD") != "1":
         subprocess.run(
-            ["cargo", "build", "--release", "--locked", "--package", "fotogramma"],
+            [
+                "cargo",
+                "build",
+                "--release",
+                "--locked",
+                "--package",
+                "fotogramma",
+                "--package",
+                "fotogramma-core",
+            ],
             cwd=RUST,
             check=True,
         )
     binary = RUST / "target" / "release" / BINARY_NAME
     if not binary.is_file():
         raise RuntimeError(f"Release binary not found: {binary}")
+    if not (RUST / "target" / "release" / CLI_NAME).is_file():
+        raise RuntimeError("Command line binary not found: build fotogramma-core too")
     return binary
 
 
@@ -112,6 +124,38 @@ def copy_media_tools(destination: Path, flat_libraries: bool = False) -> None:
                 shutil.copy2(item, target / item.name)
 
 
+def cli_binary() -> Path:
+    return RUST / "target" / "release" / CLI_NAME
+
+
+def packaged_cli(artifact: Path) -> Path:
+    if SYSTEM == "Darwin":
+        return artifact / "Contents" / "MacOS" / CLI_NAME
+    return artifact / CLI_NAME
+
+
+def verify_cli(artifact: Path) -> None:
+    """The packaged command line must find the bundled ffprobe with a clean PATH."""
+    cli = packaged_cli(artifact)
+    if not cli.is_file():
+        raise RuntimeError(f"The command line tool is missing: {cli}")
+    environment = {"PATH": "/usr/bin:/bin"} if SYSTEM != "Windows" else {
+        "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows")
+    }
+    version = subprocess.run([str(cli), "--version"], capture_output=True, text=True, env=environment)
+    if version.returncode != 0 or not version.stdout.startswith("fotogramma-cli "):
+        raise RuntimeError(f"fotogramma-cli --version failed: {version.stdout} {version.stderr}")
+    with tempfile.TemporaryDirectory() as directory:
+        scan = subprocess.run(
+            [str(cli), "scan", directory, "--no-cache", "-q"],
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+    if scan.returncode != 0:
+        raise RuntimeError(f"fotogramma-cli scan failed with the bundled tools: {scan.stderr}")
+
+
 def macos_bundle(binary: Path, version: str) -> Path:
     app = DIST / "Fotogramma.app"
     if app.exists():
@@ -125,6 +169,9 @@ def macos_bundle(binary: Path, version: str) -> Path:
     target = macos / "fotogramma"
     shutil.copy2(binary, target)
     target.chmod(0o755)
+    cli = macos / "fotogramma-cli"
+    shutil.copy2(cli_binary(), cli)
+    cli.chmod(0o755)
     shutil.copy2(ROOT / "deployment" / "Fotogramma.icns", resources / "Fotogramma.icns")
     copy_media_tools(resources)
 
@@ -162,6 +209,9 @@ def linux_bundle(binary: Path) -> Path:
     target = directory / "fotogramma"
     shutil.copy2(binary, target)
     target.chmod(0o755)
+    cli = directory / "fotogramma-cli"
+    shutil.copy2(cli_binary(), cli)
+    cli.chmod(0o755)
     copy_media_tools(directory)
     for tool in (directory / "bin").iterdir():
         tool.chmod(0o755)
@@ -174,6 +224,7 @@ def windows_bundle(binary: Path) -> Path:
         shutil.rmtree(directory)
     directory.mkdir(parents=True)
     shutil.copy2(binary, directory / "fotogramma.exe")
+    shutil.copy2(cli_binary(), directory / "fotogramma-cli.exe")
     copy_media_tools(directory, flat_libraries=True)
     return directory
 
@@ -329,6 +380,7 @@ def main() -> int:
     else:
         raise SystemExit(f"Unsupported system: {SYSTEM}")
 
+    verify_cli(artifact)
     archive = build_archive(artifact)
     if SYSTEM == "Darwin":
         verify_macos_archive(artifact, archive)

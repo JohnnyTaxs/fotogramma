@@ -153,21 +153,7 @@ pub fn config_dir() -> Option<PathBuf> {
     if cfg!(test) {
         return None;
     }
-    if cfg!(target_os = "macos") {
-        let home = std::env::var_os("HOME")?;
-        return Some(PathBuf::from(home).join("Library/Application Support/Fotogramma"));
-    }
-    if cfg!(windows) {
-        let appdata = std::env::var_os("APPDATA")?;
-        return Some(PathBuf::from(appdata).join("Fotogramma"));
-    }
-    if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") {
-        if !config.is_empty() {
-            return Some(PathBuf::from(config).join("fotogramma"));
-        }
-    }
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join(".config/fotogramma"))
+    fotogramma_core::paths::config_dir()
 }
 
 /// Where the scan cache lives. None in tests, like the settings.

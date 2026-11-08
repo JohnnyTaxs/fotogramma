@@ -33,6 +33,12 @@ It is a small native desktop app, not a service: no server, no database, no acco
 - **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
 - Full-output validation before replacing an original file.
 - **Done stays done.** After a conversion, a video whose original was replaced moves to the compatible ones; one converted into a new file stays in the list but is marked **Already converted** (hover for the output path), and *Select all* and *Export* skip it so it is not converted twice by accident.
+- **Made for big libraries:** a scan cache (a rescan reads only the files that changed), up to 8 `ffprobe` threads, a **Bitrate** column to sort by what has the most to gain, and CSV or JSON export.
+- **Keeps long jobs safe:** the queue is saved while it runs and can be resumed after a crash, paused, ordered (largest or smallest first), and followed by sleep or shutdown; the computer is kept awake meanwhile.
+- **Smarter conversions:** subtitles that do not fit MP4 send the file to MKV, HDR sources are never processed in 8 bits, results that save too little are dropped, converted files keep the date of the original, and the progress shows the time left.
+- **Your own presets:** save the custom profile under a name.
+- **Japanese and Korean file names** are drawn with a system font when a scan finds them.
+- **Command line:** `fotogramma-cli scan <folder>` lists what is left to convert, with no window.
 - **Space saved:** each converted file shows its new size against the old one, and the end of a conversion reports the total space freed (or used, if a file grew).
 - **Content type:** anime or live action (films and series). Anime gets `-tune animation`; "Automatic" reads the folders of the path (`Anime`, `Film`, `Serie TV`, `Movies`…), in English and Italian.
 - **Self-update:** the app checks GitHub at startup, shows the release notes, and installs the new version after verifying its checksum. It can be switched off.
@@ -67,8 +73,13 @@ Open **Settings** (*Impostazioni* in Italian) from the header. Changes apply imm
 - **Default output folder:** where converted files go. Empty means a `Fotogramma-H265` folder next to the originals.
 - **Replace the original by default:** pre-selects the verified replacement in the conversion dialog.
 - **Profile and container:** the preset and `mkv`/`mp4` pre-selected for new conversions.
+- **Keep the computer awake during conversions** (on by default) and a **default minimum saving**: when the new file saves less than that percentage, the original is kept and the result dropped.
+- **Remember results for faster scans:** the scan cache, with a button to clear it.
+- **Updates:** check at startup, or now.
 
 ## Conversion presets
+
+The **Custom** profile can be saved under a name (up to 40 characters) and appears in the profile menu from then on; saving under an existing name replaces it. The dialog also has **Order** (as listed, largest first for the most to gain, or smallest first for quick results), **Minimum saving**, and **When finished** (do nothing, sleep, or shut down after a 60-second countdown you can cancel). While a queue runs you can **pause after the file in progress**; if the app or the computer stops, the next start offers to resume what is left.
 
 ![Conversion dialog](docs/assets/fotogramma-conversion-dialog.png)
 
@@ -122,7 +133,7 @@ There is no macOS Intel build. Each package carries its own `ffmpeg` and `ffprob
 These are choices, not oversights:
 
 - **Software encoding only (x265), no hardware acceleration.** Hardware encoders (VideoToolbox, NVENC, QuickSync, AMF) are much faster but give a worse quality for the same size. Fotogramma is about getting the best H.265 out of a file, so it does not offer them and there is no plan to.
-- **One conversion at a time.** The queue is sequential on purpose: x265 already uses every core, and parallel jobs only saturate the CPU and the disk.
+- **One conversion at a time.** (A queue can be paused and resumed, but never runs in parallel.) The queue is sequential on purpose: x265 already uses every core, and parallel jobs only saturate the CPU and the disk.
 - **Only the first video stream is analyzed** (`v:0`) of `.mp4`, `.mkv`, and `.webm`. A file with several video streams is classified by its first one; the conversion itself keeps every stream (`-map 0`).
 - **Replacing an original does not work with WebM.** The WebM container only allows VP8, VP9 and AV1 video, so an HEVC result cannot stay a `.webm`: it has to become `.mkv` or `.mp4`. Replacing means swapping the verified result into the original's exact path with a backup, and a different extension would break that guarantee. WebM files can still be converted: the result is a new `.mkv` or `.mp4` next to them, and the original is left alone.
 - **No macOS notarization.** The app is ad-hoc signed but not notarized (that needs a paid Apple developer account), so Gatekeeper asks you to confirm the first launch.
@@ -137,6 +148,18 @@ For macOS Apple Silicon, download `Fotogramma-Darwin-arm64.dmg` from the [latest
 The same release has `Fotogramma-Darwin-arm64.zip` (extract it with Finder, or with `ditto` from a terminal; generic ZIP tools can lose permissions and app-bundle metadata). The ZIP is what the in-app updater installs.
 
 On Windows, run `fotogramma.exe` inside the extracted folder. On Linux, run the `fotogramma` binary with `bin/` and `lib/` beside it. Each package is built on its own operating system: the release is never cross-compiled.
+
+## Command line
+
+`fotogramma-cli` ships next to the app (in `Fotogramma.app/Contents/MacOS/` on macOS, beside the executable on Windows and Linux) and lists the videos that are not H.265 yet without opening a window, for example from a shell on a NAS:
+
+```bash
+fotogramma-cli scan /path/to/library                     # one path per line
+fotogramma-cli scan /path/to/library -f csv --only all -o library.csv
+fotogramma-cli scan /path/to/library --codecs hevc,av1,h264 --fail-if-convert
+```
+
+`--only` is `convert` (default), `compatible`, `error` or `all`; `-f` is `txt`, `csv` or `json`. It shares the scan cache with the app, so a scan from the shell makes the next one in the app fast. The exit code is 0, 1 when `--fail-if-convert` finds something to convert, or 2 on an error. `fotogramma-cli --help` shows the rest.
 
 ## Updates
 
@@ -183,7 +206,7 @@ The application looks for the media tools in the executable folder, `bin/` besid
 6. Convert directly or export the list for another tool.
 7. Adjust the language, the accepted codecs, and the conversion defaults in **Settings** (*Impostazioni*).
 
-The last directory, window size, and your settings are saved in `settings.toml` under the platform configuration folder. Scan results are never persisted.
+The last directory, window size, and your settings are saved in `settings.toml` under the platform configuration folder. Two other files live there: `scan-cache.json`, the cache of probe results (path, size, date, codec, resolution, duration of readable videos; turn it off or clear it in Settings), and `queue.json`, which exists only while a conversion queue runs. Nothing else about your library is stored.
 
 ## Tests
 
@@ -230,6 +253,11 @@ crates/core/               UI-free engine
   src/conversion.rs        Presets, FFmpeg arguments, safe output allocation
   src/verification.rs      Full validation and atomic backup replacement
   src/update.rs            Release check, verified download, swap helper (only network use)
+  src/cache.rs             Scan cache (path, size, date)
+  src/queue.rs             The running queue, saved so it can be resumed
+  src/export.rs            Paths, CSV and JSON lists; bitrate
+  src/paths.rs             Configuration folder shared by the app and the CLI
+  src/bin/fotogramma-cli.rs  Command line tool
   src/formatting.rs        Italian number and size formatting
 crates/app/                egui/eframe application
   src/app.rs               Window, layout, scan flow, snapshots

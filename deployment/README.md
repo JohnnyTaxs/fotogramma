@@ -64,12 +64,13 @@ python3 deployment/build_rust.py
 The script:
 
 1. reads the version from `Cargo.toml` (or `FOTOGRAMMA_VERSION`);
-2. runs `cargo build --release --locked -p fotogramma`;
+2. runs `cargo build --release --locked -p fotogramma -p fotogramma-core` (the app and the command line tool);
 3. assembles the platform bundle;
 4. creates `dist/Fotogramma-<System>-<arch>.zip`;
    on macOS it also creates `dist/Fotogramma-Darwin-arm64.dmg` (see below);
 5. on macOS, extracts the ZIP again and runs `codesign --verify --deep --strict` on both copies;
-6. fails if the app exceeds 45 MB or the ZIP exceeds 18 MB.
+6. runs the packaged `fotogramma-cli --version` and an empty scan with a clean `PATH`, to prove it finds the bundled `ffprobe`;
+7. fails if the app exceeds 45 MB or the ZIP exceeds 18 MB.
 
 Set `FOTOGRAMMA_RUST_SKIP_BUILD=1` to reuse an existing release binary.
 
@@ -86,9 +87,9 @@ Without `dmgbuild` the script skips the DMG with a warning, unless `FOTOGRAMMA_R
 
 ### Layouts
 
-- **macOS:** `Fotogramma.app/Contents/MacOS/fotogramma`, `Contents/Resources/bin/{ffmpeg,ffprobe}`, `Contents/Resources/lib/*.dylib`, `Contents/Info.plist`, `Contents/Resources/Fotogramma.icns`.
-- **Linux:** `Fotogramma/fotogramma`, `Fotogramma/bin/{ffmpeg,ffprobe}`, `Fotogramma/lib/*.so.N`.
-- **Windows:** `Fotogramma/fotogramma.exe`, `Fotogramma/bin/{ffmpeg.exe,ffprobe.exe}`, `Fotogramma/bin/*.dll`.
+- **macOS:** `Fotogramma.app/Contents/MacOS/{fotogramma,fotogramma-cli}`, `Contents/Resources/bin/{ffmpeg,ffprobe}`, `Contents/Resources/lib/*.dylib`, `Contents/Info.plist`, `Contents/Resources/Fotogramma.icns`.
+- **Linux:** `Fotogramma/{fotogramma,fotogramma-cli}`, `Fotogramma/bin/{ffmpeg,ffprobe}`, `Fotogramma/lib/*.so.N`.
+- **Windows:** `Fotogramma/{fotogramma.exe,fotogramma-cli.exe}`, `Fotogramma/bin/{ffmpeg.exe,ffprobe.exe}`, `Fotogramma/bin/*.dll`.
 
 The application searches the executable folder, `bin/` beside it, and the macOS `Resources/bin` folder before falling back to `PATH`.
 

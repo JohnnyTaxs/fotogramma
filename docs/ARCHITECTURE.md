@@ -26,7 +26,7 @@ eframe + egui (glow / OpenGL)
 
 ## Workspace
 
-`Cargo.toml` defines a two-crate workspace, version `2.6.0`:
+`Cargo.toml` defines a two-crate workspace, version `2.7.0`:
 
 | Crate | Responsibility |
 | --- | --- |
@@ -85,6 +85,10 @@ The window in `dialogs.rs` shows the release notes, then *Update and restart*, *
 
 A small Markdown renderer for the release notes in the update window: headings, bullet and numbered lists, bold, italic, inline code, code blocks, quotes, rules; links show their text only (the app opens no browser). `parse_blocks` and `parse_inline` are pure and tested. `sanitize` runs first because the notes come from the network and the interface font cannot draw every character: arrows become `->`, check marks `OK`, anything unknown `?`. Bullets are drawn, not typed.
 
+### Scan cache, queue, export and the command line
+
+`cache::ScanCache` stores the probe result of readable videos keyed by path, with size and modification time as the validity check. `scanner::probe_videos_cached` runs a pool of up to 8 threads that each take the next file, looks each file up in the cache first, and reports how many results came from it; a complete scan prunes entries under the scanned root that were not seen, an interrupted one forgets nothing. `queue::PendingQueue` is written after every file and removed when the queue ends or is stopped, and the app offers to resume a leftover one at startup. `export` renders paths, CSV (a field that starts with `=`, `+`, `-` or `@` is prefixed so a spreadsheet does not run it) or JSON, and computes the bitrate shown in the table. `paths::config_dir` is shared by the app and `fotogramma-cli`, a small binary of `fotogramma-core` with a hand-written argument parser that shares the cache with the app.
+
 ### Converted videos
 
 `FotogrammaApp::converted` maps each original to the file made from it (the original's own path when it was replaced); it lives in memory and is cleared by a new scan. `mark_replaced_videos` runs every frame, so rows change as the queue advances: a replaced video is reclassified as HEVC with its new size (and the statistics are recomputed), any success is removed from the selection, and `table::show` shows *Already converted* with the output path in the tooltip. `convertible_in` (Select all) and the export skip converted videos; `conversion_progress` gives the pending and done counts used by the card and the hint.
@@ -128,7 +132,7 @@ Cinema Pop colors and embedded **Outfit** (a static Regular instance of the vari
 
 ### `crates/app/src/settings.rs`
 
-Reads and writes `settings.toml` in `~/Library/Application Support/Fotogramma`, `%APPDATA%\Fotogramma`, or `$XDG_CONFIG_HOME/fotogramma`. The directory, window size, language, accepted codecs, and conversion defaults are stored; scan results are never persisted. Changing the accepted codecs re-classifies the loaded library with `scanner::reclassify` instead of scanning again. The config directory is disabled under `cfg!(test)` so snapshots never touch user files.
+Reads and writes `settings.toml` in `~/Library/Application Support/Fotogramma`, `%APPDATA%\Fotogramma`, or `$XDG_CONFIG_HOME/fotogramma`. The directory, window size, language, accepted codecs, conversion defaults, the user's presets, and the cache switch are stored. Scan results are not in `settings.toml`; the only copy of them is the scan cache described below. Changing the accepted codecs re-classifies the loaded library with `scanner::reclassify` instead of scanning again. The config directory is disabled under `cfg!(test)` so snapshots never touch user files.
 
 ## UI states
 

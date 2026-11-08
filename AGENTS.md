@@ -10,10 +10,11 @@ Operational guide for agents modifying **Fotogramma Desktop** (v2, Rust). The we
 - Only the first video stream (`v:0`) of `.mp4`, `.mkv`, and `.webm` is analyzed.
 - **The interface font cannot draw everything.** In the app a missing glyph is drawn as an empty box (egui's default `Tofu` policy); only the test harness turns it into a panic, so a test is how you find one. Outfit has accents, `·`, `…`, `×`, bullets, `← ↑ → ↓` and `✓`; it has no `✔`, `⇒`, `★`, emoji, or CJK. Add a new symbol only after rendering it in a test; text from outside, such as release notes, goes through `markdown::sanitize`. File names in Japanese, Chinese or Korean are drawn with a system font that `theme::ensure_fallback_fonts` loads only when a scan finds such names (Korean on macOS is 55 MB).
 - **x265 has no `film` tune** (that is x264): never pass `-tune film`; the valid tunes here are `animation` and `grain`. Content type (`MediaKind` in `conversion.rs`) only chooses the tune: anime → `animation`, live action → none. Detection reads the folders only, and anime anywhere in the path wins.
+- **Conversions are never silently degraded.** An MP4 target with subtitles MP4 cannot hold falls back to MKV (`container_for`), an HDR source is never processed in 8 bits (`profile_for_video`), and a result that saves less than the chosen minimum is dropped with the original kept. Converted files keep the original's modification time.
 - No CDN or online service is required at runtime; if GitHub is unreachable the app works exactly the same.
 - **Updates are verified before they are installed.** The package must be an asset of this repository's release, its SHA-256 must match `SHA256SUMS.txt` (published by `create_release.py`), and on macOS `codesign --verify` must pass before the swap. A development binary (`cargo run`) is never replaced. The swap runs in a helper script after the app quits and restores the old copy if the move fails.
 - **Two languages: Italian and English.** Every user-visible string goes through `tr_str` or `tr!` with both texts (never a bare literal), including messages built in `core` and on worker threads. The language is process-wide (`i18n::set_lang`); Italian is the default, `auto` follows the OS through `sys-locale`, and the Settings window can override it. Prefer "Label: {}" over "{} items" so no plural form is needed. Tests fix the system locale to `it-IT`; UI tests take the `lang_guard` lock, and English output is tested in `crates/core/tests/english.rs`.
-- `settings.toml` stores the directory, window size, language, accepted codecs, and conversion defaults (replace original, profile, container, content type, output folder), never scan results.
+- `settings.toml` stores the directory, window size, language, accepted codecs, conversion defaults (replace original, profile, container, content type, output folder, minimum saving, keep awake), the user's presets, and the cache switch. Scan results are never in it. The only copy of probe results is `scan-cache.json` (readable videos only, keyed by path, size and mtime, written atomically, switchable and clearable), and `queue.json` exists only while a queue runs. Do not store anything else about the library.
 - Build **onedir** for each OS/architecture, never onefile and never cross-compiled. macOS also ships a drag-to-Applications `.dmg` (`dmgbuild`, background in `deployment/dmg/`); the ZIP stays because the updater installs it.
 - The packaged app must stay within **45 MB** with a ZIP (and the DMG) within **18 MB**.
 
@@ -51,6 +52,11 @@ Linux and Windows build x265 with `deployment/ffmpeg/build_x265.sh` (8-bit + 10-
 | `crates/core/src/media_tools.rs` | ffmpeg/ffprobe resolution in source and packaged builds; `DYLD_LIBRARY_PATH` only on macOS. |
 | `crates/core/src/conversion.rs` | Profiles, FFmpeg arguments, and `MediaKind` detection. Use `-n`, `-map 0`, and non-overwriting output. |
 | `crates/core/src/i18n.rs` | `Lang`, the process-wide language, `tr_str` and `tr!`. No other module may hardcode user-visible text in one language. |
+| `crates/core/src/cache.rs` | Scan cache. A hit needs the same path, size and mtime; unreadable files are never cached. |
+| `crates/core/src/queue.rs` | The running queue on disk, so it can be resumed; removed when the queue ends or is stopped. |
+| `crates/core/src/export.rs` | Paths, CSV (formulas defused) and JSON lists, and bitrate. |
+| `crates/core/src/paths.rs` | The configuration folder, shared by the app and the CLI. |
+| `crates/core/src/bin/fotogramma-cli.rs` | The command line tool: no window, no network, same engine. Keep it free of UI code. |
 | `crates/core/src/update.rs` | Release check, verified download, staging, and the swap helper. The only module that uses the network. |
 | `crates/core/src/verification.rs` | Codec/duration/stream validation, full decode, and atomic backup replacement. |
 | `crates/app/src/app.rs` | Entry state, layout, selection, scan flow, smoke test, four snapshots. |
