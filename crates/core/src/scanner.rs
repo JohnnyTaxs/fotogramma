@@ -294,6 +294,15 @@ fn error_video(path: &Path, root: &Path, message: String, size: Option<u64>) -> 
     }
 }
 
+pub fn absolute_path(path: &Path) -> PathBuf {
+    absolute(path)
+}
+
+/// The folder label of a relative path, as shown in the table.
+pub fn folder_of(relative: &str) -> String {
+    parent_label(relative)
+}
+
 fn absolute(path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()
@@ -481,63 +490,98 @@ pub fn probe_video(
 
 /// Probe a batch of candidates at a time so cancellation never leaves a long queue.
 /// Results keep discovery order and are finally sorted by relative path.
+/// The probing threads never wait for a slow file: each takes the next one.
+const MAX_PROBE_THREADS: usize = 8;
+
+pub struct ProbeOutcome {
+    pub videos: Vec<VideoInfo>,
+    pub cancelled: bool,
+    /// How many results came from the cache instead of `ffprobe`.
+    pub from_cache: usize,
+}
+
 pub fn probe_videos(
     candidates: &[PathBuf],
     root: &Path,
     ffprobe: &Path,
     cancel: Option<&AtomicBool>,
-    mut on_progress: impl FnMut(usize, usize, &str, &VideoInfo),
+    on_progress: impl FnMut(usize, usize, &str, &VideoInfo),
 ) -> (Vec<VideoInfo>, bool) {
+    let outcome = probe_videos_cached(candidates, root, ffprobe, cancel, None, on_progress);
+    (outcome.videos, outcome.cancelled)
+}
+
+/// Probe every candidate on a pool of threads, reusing `cache` for files that
+/// have not changed. Results come back sorted by path; `on_progress` runs on
+/// the calling thread, in completion order.
+pub fn probe_videos_cached(
+    candidates: &[PathBuf],
+    root: &Path,
+    ffprobe: &Path,
+    cancel: Option<&AtomicBool>,
+    cache: Option<&crate::cache::ScanCache>,
+    mut on_progress: impl FnMut(usize, usize, &str, &VideoInfo),
+) -> ProbeOutcome {
     let worker_count = std::thread::available_parallelism()
         .map(|value| value.get())
         .unwrap_or(2)
-        .clamp(1, 4);
-    let mut results = Vec::with_capacity(candidates.len());
-    let mut processed = 0;
-    let mut cancelled = false;
+        .clamp(1, MAX_PROBE_THREADS);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut slots: Vec<Option<VideoInfo>> = vec![None; candidates.len()];
+    let (mut processed, mut from_cache, mut cancelled) = (0, 0, false);
 
-    for batch in candidates.chunks(worker_count) {
-        if is_cancelled(cancel) {
-            cancelled = true;
-            break;
+    std::thread::scope(|scope| {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        for _ in 0..worker_count {
+            let sender = sender.clone();
+            let next = &next;
+            scope.spawn(move || loop {
+                if is_cancelled(cancel) {
+                    break;
+                }
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                let Some(path) = candidates.get(index) else {
+                    break;
+                };
+                let result = match cache.and_then(|cache| cache.lookup(path, root)) {
+                    Some(video) => Ok((video, true)),
+                    None => probe_video(path, root, ffprobe, cancel).map(|video| {
+                        if let Some(cache) = cache {
+                            cache.insert(&video);
+                        }
+                        (video, false)
+                    }),
+                };
+                if sender.send((index, result)).is_err() {
+                    break;
+                }
+            });
         }
-        let batch_results: Vec<Result<VideoInfo, ProbeError>> = std::thread::scope(|scope| {
-            let handles: Vec<_> = batch
-                .iter()
-                .map(|path| scope.spawn(move || probe_video(path, root, ffprobe, cancel)))
-                .collect();
-            handles
-                .into_iter()
-                .map(|handle| handle.join().unwrap_or(Err(ProbeError::Cancelled)))
-                .collect()
-        });
-
-        for (path, result) in batch.iter().zip(batch_results) {
-            if let Ok(info) = result {
-                processed += 1;
-                on_progress(
-                    processed,
-                    candidates.len(),
-                    &relative_path(path, root),
-                    &info,
-                );
-                results.push(info);
-            } else {
-                cancelled = true;
+        drop(sender);
+        for (index, result) in receiver {
+            match result {
+                Ok((video, hit)) => {
+                    processed += 1;
+                    from_cache += usize::from(hit);
+                    on_progress(processed, candidates.len(), &video.relative_path, &video);
+                    slots[index] = Some(video);
+                }
+                Err(_) => cancelled = true,
             }
         }
-        if cancelled {
-            break;
-        }
-    }
+    });
 
-    results.sort_by(|left, right| {
+    let mut videos: Vec<VideoInfo> = slots.into_iter().flatten().collect();
+    videos.sort_by(|left, right| {
         left.relative_path
             .to_lowercase()
             .cmp(&right.relative_path.to_lowercase())
     });
-    let cancelled = cancelled || is_cancelled(cancel);
-    (results, cancelled)
+    ProbeOutcome {
+        videos,
+        cancelled: cancelled || is_cancelled(cancel),
+        from_cache,
+    }
 }
 
 pub fn summarize(videos: &[VideoInfo], total: Option<usize>) -> Summary {

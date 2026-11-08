@@ -70,15 +70,12 @@ pub enum DialogOutcome {
 
 impl ConversionDialog {
     pub fn new(videos: Vec<VideoInfo>, defaults: &Settings) -> Self {
-        let destination = if defaults.output_dir.trim().is_empty() {
-            videos
-                .first()
-                .and_then(|video| video.path.parent())
-                .map(|parent| parent.join("Fotogramma-H265"))
-                .unwrap_or_else(|| PathBuf::from("Fotogramma-H265"))
-        } else {
-            PathBuf::from(defaults.output_dir.trim())
-        };
+        let destination = videos
+            .first()
+            .map(|video| {
+                fotogramma_core::conversion::output_dir_for(&video.path, &defaults.output_dir)
+            })
+            .unwrap_or_else(|| PathBuf::from(defaults.output_dir.trim()));
         let detected = detect_selection(videos.iter().map(|video| video.path.as_path()));
         let balanced = builtin_profile("balanced").expect("balanced profile");
         let mut dialog = Self {
@@ -1201,12 +1198,14 @@ impl ConversionSession {
 pub struct SettingsOutcome {
     pub changed: bool,
     pub check_now: bool,
+    pub clear_cache: bool,
     pub closed: bool,
 }
 
 pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOutcome {
     let mut changed = false;
     let mut check_now = false;
+    let mut clear_cache = false;
     let mut closed = false;
     let screen_height = ctx.content_rect().height();
     let modal_id = egui::Id::unique("settings-dialog");
@@ -1472,6 +1471,40 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
             });
 
             ui.add_space(8.0);
+            ui.label(RichText::new(tr_str("Scansione", "Scanning")).strong());
+            ui.horizontal(|ui| {
+                if ui
+                    .checkbox(
+                        &mut settings.scan_cache,
+                        tr_str(
+                            "Ricorda i risultati per scansioni più veloci",
+                            "Remember results for faster scans",
+                        ),
+                    )
+                    .changed()
+                {
+                    changed = true;
+                }
+                if ui
+                    .add(theme::secondary_button(tr_str(
+                        "Svuota la cache",
+                        "Clear the cache",
+                    )))
+                    .clicked()
+                {
+                    clear_cache = true;
+                }
+            });
+            ui.label(
+                RichText::new(tr_str(
+                    "Una nuova scansione rilegge solo i file cambiati (stesso percorso, dimensione e data).",
+                    "A new scan only reads the files that changed (same path, size and date).",
+                ))
+                .small()
+                .color(theme::MUTED),
+            );
+
+            ui.add_space(8.0);
             ui.label(RichText::new(tr_str("Aggiornamenti", "Updates")).strong());
             ui.horizontal(|ui| {
                 if ui
@@ -1532,6 +1565,7 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
     SettingsOutcome {
         changed,
         check_now,
+        clear_cache,
         closed,
     }
 }

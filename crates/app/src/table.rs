@@ -2,19 +2,21 @@
 
 use eframe::egui::{self, Align, Align2, CornerRadius, FontId, Label, RichText, Sense, Stroke};
 use egui_extras::{Column, TableBuilder};
+use fotogramma_core::export::bitrate_kbps;
 use fotogramma_core::formatting::{codec_label, format_bytes, format_duration};
 use fotogramma_core::i18n::tr_str;
 use fotogramma_core::scanner::{Category, VideoInfo};
 
 use crate::theme;
 
-pub fn headers() -> [&'static str; 6] {
+pub fn headers() -> [&'static str; 7] {
     [
         "Video",
         "Codec",
         tr_str("Durata", "Duration"),
         tr_str("Risoluzione", "Resolution"),
         tr_str("Dimensione", "Size"),
+        "Bitrate",
         tr_str("Azione", "Action"),
     ]
 }
@@ -122,6 +124,9 @@ pub fn visible_indices(
                 .total_cmp(&b.duration.unwrap_or(-1.0)),
             3 => resolution(a).cmp(&resolution(b)),
             4 => a.size.unwrap_or(0).cmp(&b.size.unwrap_or(0)),
+            5 => bitrate_kbps(a)
+                .unwrap_or(0)
+                .cmp(&bitrate_kbps(b).unwrap_or(0)),
             _ => a.category.order().cmp(&b.category.order()),
         };
         if sort.ascending {
@@ -158,6 +163,7 @@ pub fn show(
             .column(Column::exact(70.0))
             .column(Column::exact(116.0))
             .column(Column::exact(92.0))
+            .column(Column::exact(88.0))
             .column(Column::exact(156.0))
             .header(28.0, |mut header| {
                 for (index, title) in headers().iter().enumerate() {
@@ -246,6 +252,27 @@ pub fn show(
                             RichText::new(format_bytes(video.size))
                                 .font(theme::mono(11.0))
                                 .color(theme::MUTED),
+                        );
+                    });
+                    row.col(|ui| {
+                        let text = match bitrate_kbps(video) {
+                            Some(kbps) if kbps >= 1000 => {
+                                format!("{:.1} Mb/s", kbps as f64 / 1000.0)
+                            }
+                            Some(kbps) => format!("{kbps} kb/s"),
+                            None => "—".to_string(),
+                        };
+                        ui.label(
+                            RichText::new(
+                                if fotogramma_core::i18n::lang() == fotogramma_core::i18n::Lang::It
+                                {
+                                    text.replace('.', ",")
+                                } else {
+                                    text
+                                },
+                            )
+                            .font(theme::mono(11.0))
+                            .color(theme::MUTED),
                         );
                     });
                     row.col(|ui| {
@@ -394,5 +421,26 @@ mod tests {
         sort.toggle(1);
         assert_eq!(sort.column, 1);
         assert!(sort.ascending);
+    }
+
+    #[test]
+    fn sorts_by_bitrate_to_find_the_files_with_the_most_to_gain() {
+        // Same size, different durations: the shortest has the highest bitrate.
+        let mut videos = vec![
+            video("slow.mkv", "h264", Category::Convert, 1_000_000),
+            video("fast.mkv", "h264", Category::Convert, 1_000_000),
+            video("mid.mkv", "h264", Category::Convert, 1_000_000),
+        ];
+        videos[0].duration = Some(100.0);
+        videos[1].duration = Some(10.0);
+        videos[2].duration = Some(50.0);
+        let by_bitrate = SortState {
+            column: 5,
+            ascending: false,
+        };
+        assert_eq!(
+            visible_indices(&videos, FilterCategory::All, "", by_bitrate),
+            vec![1, 2, 0]
+        );
     }
 }

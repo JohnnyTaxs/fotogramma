@@ -21,6 +21,9 @@ pub struct Settings {
     pub window_width: Option<f32>,
     #[serde(default)]
     pub window_height: Option<f32>,
+    /// Reuse the results of an earlier scan for files that did not change.
+    #[serde(default = "default_true")]
+    pub scan_cache: bool,
     /// Keep the computer awake while a conversion runs.
     #[serde(default = "default_true")]
     pub prevent_sleep: bool,
@@ -90,6 +93,7 @@ impl Default for Settings {
             window_height: None,
             language: default_language(),
             check_updates: true,
+            scan_cache: true,
             prevent_sleep: true,
             min_saving_percent: 0,
             skipped_update: String::new(),
@@ -149,6 +153,11 @@ pub fn config_dir() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".config/fotogramma"))
 }
 
+/// Where the scan cache lives. None in tests, like the settings.
+pub fn cache_file() -> Option<PathBuf> {
+    config_dir().map(|directory| directory.join("scan-cache.json"))
+}
+
 pub fn config_file() -> Option<PathBuf> {
     config_dir().map(|directory| directory.join("settings.toml"))
 }
@@ -165,6 +174,7 @@ mod tests {
             window_height: Some(820.0),
             language: "en".to_string(),
             check_updates: false,
+            scan_cache: false,
             prevent_sleep: false,
             min_saving_percent: 15,
             skipped_update: "v9.9.9".to_string(),
@@ -187,6 +197,7 @@ mod tests {
         assert_eq!(parsed.language, "en");
         assert!(!parsed.check_updates);
         assert!(!parsed.prevent_sleep);
+        assert!(!parsed.scan_cache);
         assert_eq!(parsed.min_saving_percent, 15);
         assert_eq!(parsed.skipped_update, "v9.9.9");
     }
@@ -205,6 +216,7 @@ mod tests {
         assert_eq!(parsed.language, "auto");
         assert!(parsed.check_updates);
         assert!(parsed.prevent_sleep);
+        assert!(parsed.scan_cache);
         assert_eq!(parsed.min_saving_percent, 0);
         assert!(parsed.skipped_update.is_empty());
     }

@@ -4,6 +4,7 @@ use eframe::egui::{
     self, Align, Align2, Color32, CornerRadius, FontId, Key, Layout, RichText, Sense, Stroke,
     StrokeKind, Vec2,
 };
+use fotogramma_core::export::{self, Format};
 use fotogramma_core::formatting::{format_bytes, format_int};
 use fotogramma_core::media_tools::{ffprobe_path, ffprobe_version};
 use fotogramma_core::scanner::{
@@ -310,6 +311,8 @@ impl FotogrammaApp {
                     videos,
                     warnings,
                     cancelled,
+                    from_cache,
+                    already_converted,
                 } => {
                     self.scanning = false;
                     self.scan_receiver = None;
@@ -322,6 +325,8 @@ impl FotogrammaApp {
                     self.summary = summarize(&self.videos, None);
                     self.selected.clear();
                     self.converted.clear();
+                    // Videos an earlier session already converted into the output folder.
+                    self.converted.extend(already_converted);
                     self.selection_anchor = None;
                     self.filter = FilterCategory::Convert;
                     self.page = Page::Results;
@@ -329,10 +334,16 @@ impl FotogrammaApp {
                     if self.args.smoke_test {
                         self.close_after_scan_at = Some(Instant::now());
                     }
-                    self.set_status(
-                        tr_str("Nessun file viene modificato", "No file is modified"),
-                        Duration::from_secs(4),
-                    );
+                    let status = if from_cache > 0 {
+                        fotogramma_core::tr!(
+                            "Nessun file viene modificato · dalla cache: {}",
+                            "No file is modified · from the cache: {}",
+                            format_int(from_cache)
+                        )
+                    } else {
+                        tr_str("Nessun file viene modificato", "No file is modified").to_string()
+                    };
+                    self.set_status(status, Duration::from_secs(6));
                     ctx.request_repaint();
                 }
                 ScanMessage::Failed(message) => {
@@ -383,7 +394,15 @@ impl FotogrammaApp {
         self.scan_progress = Some((0, None, String::new()));
         let cancel = Arc::new(AtomicBool::new(false));
         self.scan_cancel = Some(cancel.clone());
-        self.scan_receiver = Some(worker::spawn_scan(path, cancel, ctx.clone()));
+        let options = worker::ScanOptions {
+            cache_file: if self.settings.scan_cache {
+                crate::settings::cache_file()
+            } else {
+                None
+            },
+            output_dir: self.settings.output_dir.clone(),
+        };
+        self.scan_receiver = Some(worker::spawn_scan(path, options, cancel, ctx.clone()));
         ctx.request_repaint();
     }
 
@@ -504,6 +523,15 @@ impl FotogrammaApp {
             }
             if outcome.check_now {
                 self.start_update_check(ctx, true);
+            }
+            if outcome.clear_cache {
+                if let Some(file) = crate::settings::cache_file() {
+                    let _ = std::fs::remove_file(file);
+                }
+                self.set_status(
+                    tr_str("Cache della scansione svuotata", "Scan cache cleared"),
+                    Duration::from_secs(4),
+                );
             }
             if outcome.closed {
                 self.show_settings = false;
@@ -1248,37 +1276,45 @@ impl FotogrammaApp {
         });
     }
 
+    /// The videos still to convert, as plain paths, CSV or JSON: the format
+    /// follows the extension chosen in the save dialog.
     fn export_videos(&mut self) {
-        let convertible: Vec<String> = self
+        let pending: Vec<VideoInfo> = self
             .videos
             .iter()
             .filter(|video| video.category == fotogramma_core::scanner::Category::Convert)
             .filter(|video| !self.converted.contains_key(&video.path))
-            .map(|video| video.path.to_string_lossy().into_owned())
+            .cloned()
             .collect();
-        if convertible.is_empty() {
+        if pending.is_empty() {
             self.set_status(
                 tr_str("Nessun video da convertire", "No videos to convert"),
                 Duration::from_secs(4),
             );
             return;
         }
-        let default_file = home_directory().join("fotogramma-da-convertire.txt");
         let Some(target) = rfd::FileDialog::new()
             .set_file_name("fotogramma-da-convertire.txt")
             .set_directory(home_directory())
-            .add_filter(tr_str("File di testo", "Text file"), &["txt"])
+            .add_filter(tr_str("Elenco di percorsi", "List of paths"), &["txt"])
+            .add_filter("CSV", &["csv"])
+            .add_filter("JSON", &["json"])
             .save_file()
         else {
             return;
         };
-        let _ = default_file;
-        match std::fs::write(&target, format!("{}\n", convertible.join("\n"))) {
+        let format = Format::from_extension(
+            &target
+                .extension()
+                .map(|extension| extension.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        );
+        match std::fs::write(&target, export::render(&pending, format)) {
             Ok(()) => self.set_status(
                 fotogramma_core::tr!(
-                    "Percorsi esportati: {} · {}",
-                    "Paths exported: {} · {}",
-                    format_int(convertible.len()),
+                    "Video esportati: {} · {}",
+                    "Videos exported: {} · {}",
+                    format_int(pending.len()),
                     target.display()
                 ),
                 Duration::from_secs(7),

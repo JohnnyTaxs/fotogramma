@@ -307,6 +307,34 @@ pub fn build_ffmpeg_args(
     args
 }
 
+/// Where a conversion of `source` puts its result: the folder chosen in the
+/// settings, or a `Fotogramma-H265` folder next to the original.
+pub fn output_dir_for(source: &Path, configured: &str) -> PathBuf {
+    let configured = configured.trim();
+    if configured.is_empty() {
+        source
+            .parent()
+            .map(|parent| parent.join("Fotogramma-H265"))
+            .unwrap_or_else(|| PathBuf::from("Fotogramma-H265"))
+    } else {
+        PathBuf::from(configured)
+    }
+}
+
+/// The file an earlier conversion made from `source`, if it is still in
+/// `output_dir`: `name.h265.mkv` or `name.h265.mp4`, not empty.
+pub fn existing_output(source: &Path, output_dir: &Path) -> Option<PathBuf> {
+    let stem = source.file_stem()?.to_string_lossy().into_owned();
+    ["mkv", "mp4"]
+        .iter()
+        .map(|extension| output_dir.join(format!("{stem}.h265.{extension}")))
+        .find(|candidate| {
+            std::fs::metadata(candidate)
+                .map(|metadata| metadata.is_file() && metadata.len() > 0)
+                .unwrap_or(false)
+        })
+}
+
 /// Never overwrite: choose `name.h265.<container>` and add a counter on collisions.
 pub fn allocate_output_path(
     source: &Path,
@@ -596,5 +624,43 @@ mod tests {
         assert_eq!(profile_for_video(&fast, false).pixel_format, "yuv420p");
         let balanced = profile("balanced").unwrap();
         assert_eq!(profile_for_video(&balanced, true), balanced);
+    }
+
+    #[test]
+    fn the_output_folder_is_the_configured_one_or_next_to_the_original() {
+        let source = Path::new("/Media/Show/a.mkv");
+        assert_eq!(
+            output_dir_for(source, ""),
+            PathBuf::from("/Media/Show").join("Fotogramma-H265")
+        );
+        assert_eq!(
+            output_dir_for(source, "  /Volumes/Out "),
+            PathBuf::from("/Volumes/Out")
+        );
+    }
+
+    #[test]
+    fn an_earlier_result_is_found_in_the_output_folder() {
+        let directory = std::env::temp_dir().join(format!("foto-existing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = Path::new("/lib/Show/Episode 1.mkv");
+        assert_eq!(existing_output(source, &directory), None);
+        std::fs::write(directory.join("Episode 1.h265.mp4"), b"").unwrap();
+        assert_eq!(
+            existing_output(source, &directory),
+            None,
+            "an empty file is not a result"
+        );
+        std::fs::write(directory.join("Episode 1.h265.mp4"), b"video").unwrap();
+        assert_eq!(
+            existing_output(source, &directory),
+            Some(directory.join("Episode 1.h265.mp4"))
+        );
+        assert_eq!(
+            existing_output(Path::new("/lib/Other.mkv"), &directory),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

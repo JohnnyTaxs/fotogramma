@@ -2,14 +2,15 @@
 //! every update travels through a channel to the GUI thread.
 
 use eframe::egui;
+use fotogramma_core::cache::ScanCache;
 use fotogramma_core::conversion::{
-    allocate_output_path, allocate_partial_path, build_ffmpeg_args, container_for,
-    profile_for_video, ConversionProfile,
+    allocate_output_path, allocate_partial_path, build_ffmpeg_args, container_for, existing_output,
+    output_dir_for, profile_for_video, ConversionProfile,
 };
 use fotogramma_core::formatting::SpaceChange;
 use fotogramma_core::i18n::tr_str;
 use fotogramma_core::media_tools::{ffmpeg_path, ffprobe_path, prepare_command};
-use fotogramma_core::scanner::{discover_videos, probe_videos, DiscoveryWarning, VideoInfo};
+use fotogramma_core::scanner::{discover_videos, probe_videos_cached, DiscoveryWarning, VideoInfo};
 use fotogramma_core::update::{self, InstallTarget, Release};
 use fotogramma_core::verification::{
     replace_verified_output, subtitle_codecs, validate_conversion_output,
@@ -34,18 +35,32 @@ pub enum ScanMessage {
         videos: Vec<VideoInfo>,
         warnings: Vec<DiscoveryWarning>,
         cancelled: bool,
+        /// Results taken from the cache instead of `ffprobe`.
+        from_cache: usize,
+        /// Videos to convert that an earlier conversion already made a file for.
+        already_converted: Vec<(PathBuf, PathBuf)>,
     },
     Failed(String),
 }
 
+/// What a scan is allowed to reuse.
+#[derive(Clone, Debug, Default)]
+pub struct ScanOptions {
+    /// The cache file, or `None` to probe everything.
+    pub cache_file: Option<PathBuf>,
+    /// The output folder of the settings, to find earlier conversions.
+    pub output_dir: String,
+}
+
 pub fn spawn_scan(
     directory: PathBuf,
+    options: ScanOptions,
     cancel: Arc<AtomicBool>,
     ctx: egui::Context,
 ) -> Receiver<ScanMessage> {
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
-        if let Err(message) = run_scan(&directory, &cancel, &sender, &ctx) {
+        if let Err(message) = run_scan(&directory, &options, &cancel, &sender, &ctx) {
             let _ = sender.send(ScanMessage::Failed(message));
         }
         ctx.request_repaint();
@@ -55,6 +70,7 @@ pub fn spawn_scan(
 
 fn run_scan(
     directory: &std::path::Path,
+    options: &ScanOptions,
     cancel: &Arc<AtomicBool>,
     sender: &Sender<ScanMessage>,
     ctx: &egui::Context,
@@ -88,6 +104,8 @@ fn run_scan(
             videos: Vec::new(),
             warnings,
             cancelled: true,
+            from_cache: 0,
+            already_converted: Vec::new(),
         });
         return Ok(());
     }
@@ -100,18 +118,36 @@ fn run_scan(
         });
         ctx.request_repaint();
     };
-    let (videos, cancelled) = probe_videos(
+    let cache = options.cache_file.as_deref().map(ScanCache::load);
+    let outcome = probe_videos_cached(
         &candidates,
         directory,
         &ffprobe,
         Some(cancel),
+        cache.as_ref(),
         &mut progressed,
     );
+    if let (Some(cache), Some(file)) = (&cache, &options.cache_file) {
+        cache.finish(directory, !outcome.cancelled);
+        // A cache that cannot be written only costs speed next time.
+        let _ = cache.save(file);
+    }
+    let already_converted = outcome
+        .videos
+        .iter()
+        .filter(|video| video.category == fotogramma_core::scanner::Category::Convert)
+        .filter_map(|video| {
+            let folder = output_dir_for(&video.path, &options.output_dir);
+            existing_output(&video.path, &folder).map(|output| (video.path.clone(), output))
+        })
+        .collect();
 
     let _ = sender.send(ScanMessage::Completed {
-        videos,
+        videos: outcome.videos,
         warnings,
-        cancelled,
+        cancelled: outcome.cancelled,
+        from_cache: outcome.from_cache,
+        already_converted,
     });
     Ok(())
 }
@@ -993,5 +1029,65 @@ mod tests {
             None,
             "too early to tell"
         );
+    }
+
+    #[test]
+    fn a_scan_finds_earlier_conversions_and_reuses_its_cache() {
+        let Some((ffmpeg, _)) = tools() else {
+            eprintln!("skipped: no ffmpeg");
+            return;
+        };
+        let directory = scratch("scan");
+        let library = directory.join("library");
+        std::fs::create_dir_all(library.join("Fotogramma-H265")).unwrap();
+        clip(&ffmpeg, &library, "done.mp4");
+        clip(&ffmpeg, &library, "todo.mp4");
+        // `done.mp4` already has a result next to it.
+        std::fs::write(
+            library.join("Fotogramma-H265").join("done.h265.mkv"),
+            b"converted",
+        )
+        .unwrap();
+
+        let scan = |cache: &std::path::Path| {
+            let receiver = spawn_scan(
+                library.clone(),
+                ScanOptions {
+                    cache_file: Some(cache.to_path_buf()),
+                    output_dir: String::new(),
+                },
+                Arc::new(AtomicBool::new(false)),
+                egui::Context::default(),
+            );
+            while let Ok(message) = receiver.recv_timeout(Duration::from_secs(60)) {
+                if let ScanMessage::Completed {
+                    videos,
+                    from_cache,
+                    already_converted,
+                    ..
+                } = message
+                {
+                    return (videos, from_cache, already_converted);
+                }
+            }
+            panic!("the scan did not finish");
+        };
+        let cache = directory.join("scan-cache.json");
+        let (videos, from_cache, done) = scan(&cache);
+        // The result in `Fotogramma-H265` is a video of the library too (here an
+        // unreadable one, since it is not a real video).
+        assert_eq!(videos.len(), 3);
+        assert_eq!(from_cache, 0);
+        assert_eq!(done.len(), 1);
+        assert!(done[0].0.ends_with("done.mp4") && done[0].1.ends_with("done.h265.mkv"));
+        assert!(cache.exists(), "the cache was written");
+
+        let (_, from_cache, done) = scan(&cache);
+        assert_eq!(
+            from_cache, 2,
+            "the two readable files come from the cache, the unreadable one is probed again"
+        );
+        assert_eq!(done.len(), 1, "the earlier conversion is still recognised");
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

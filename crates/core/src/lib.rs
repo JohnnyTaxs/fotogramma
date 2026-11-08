@@ -6,7 +6,9 @@
 //! failures are errors. Originals are replaced only after codec, duration,
 //! stream, full-decode and backup validation.
 
+pub mod cache;
 pub mod conversion;
+pub mod export;
 pub mod formatting;
 pub mod i18n;
 pub mod media_tools;
