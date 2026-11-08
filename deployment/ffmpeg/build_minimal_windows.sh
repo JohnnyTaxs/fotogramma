@@ -2,14 +2,19 @@
 # Build the minimal FFmpeg used by the Windows application.
 #
 # Must run inside an MSYS2 MINGW64 shell with:
-#   make, mingw-w64-x86_64-toolchain, mingw-w64-x86_64-nasm,
-#   mingw-w64-x86_64-pkgconf, mingw-w64-x86_64-x265
+#   make, cmake, mingw-w64-x86_64-toolchain, mingw-w64-x86_64-nasm,
+#   mingw-w64-x86_64-pkgconf
+#
+# x265 is built from source (see build_x265.sh) because the MSYS2 package
+# carries all three bit depths and is 22 MB; the application only encodes
+# 8-bit and 10-bit HEVC.
 #
 # Every DLL is collected next to the executables so the application works from
 # any folder without MinGW installed.
 set -euo pipefail
 
 VERSION="${FFMPEG_VERSION:-9.0.2}"
+X265_VERSION="${X265_VERSION:-4.3}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 WORK="${FOTOGRAMMA_FFMPEG_WORK:-$ROOT/deployment/vendor/rust/build}"
@@ -25,6 +30,12 @@ if [ ! -d "$SRC" ]; then
     "https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz"
   tar -xf "$WORK/ffmpeg-$VERSION.tar.xz" -C "$WORK"
 fi
+
+X265_PREFIX="$WORK/x265-$X265_VERSION"
+if [ ! -f "$X265_PREFIX/lib/pkgconfig/x265.pc" ]; then
+  "$HERE/build_x265.sh" "$X265_PREFIX"
+fi
+export PKG_CONFIG_PATH="$X265_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
 cd "$SRC"
 
@@ -67,7 +78,8 @@ rm -rf "$VENDOR"
 mkdir -p "$VENDOR/bin"
 cp "$PREFIX/bin/ffmpeg.exe" "$PREFIX/bin/ffprobe.exe" "$VENDOR/bin/"
 cp "$PREFIX"/bin/*.dll "$VENDOR/bin/" 2>/dev/null || true
-export PATH="$VENDOR/bin:$PREFIX/bin:$PATH"
+cp "$X265_PREFIX"/bin/*x265*.dll "$VENDOR/bin/"
+export PATH="$VENDOR/bin:$X265_PREFIX/bin:$PREFIX/bin:$PATH"
 
 collect_dlls() {
   local binary="$1"
@@ -87,6 +99,9 @@ collect_dlls() {
 
 collect_dlls "$VENDOR/bin/ffmpeg.exe"
 collect_dlls "$VENDOR/bin/ffprobe.exe"
+for dll in "$VENDOR"/bin/*.dll; do
+  collect_dlls "$dll"
+done
 
 # MinGW installs keep symbols in the PE files; strip them so the portable
 # application stays inside the size budget. Exports and relocations remain.

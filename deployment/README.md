@@ -7,8 +7,8 @@ The directory is named `deployment/` rather than `packaging/` to avoid a conflic
 - A stable Rust toolchain (`cargo`, `rustc`);
 - Python 3.10+ for the packaging and collector scripts;
 - on macOS: Xcode command line tools, `pkgconf`, and `x265` from Homebrew;
-- on Linux: `build-essential`, `pkg-config`, `nasm`, `patchelf`, `libx265-dev`, plus the X11/Wayland/OpenGL development packages listed in the CI workflow;
-- on Windows: MSYS2 MINGW64 with `mingw-w64-x86_64-toolchain`, `nasm`, `pkgconf`, and `x265`, and the MSVC Rust toolchain on the host.
+- on Linux: `build-essential`, `pkg-config`, `nasm`, `cmake`, `patchelf`, plus the X11/Wayland/OpenGL development packages listed in the CI workflow;
+- on Windows: MSYS2 MINGW64 with `mingw-w64-x86_64-toolchain`, `nasm`, `cmake`, `pkgconf`, and the MSVC Rust toolchain on the host.
 
 None of these are required on the destination computer.
 
@@ -35,6 +35,10 @@ Enabled components:
 
 Network support, devices, x264, SVT-AV1, libvpx, OpenSSL, VMAF, mp3lame, and opus encoders are excluded. The resulting toolchain is about 17 MB instead of 38 MB on macOS.
 
+### x265
+
+macOS uses Homebrew's arm64 x265 (7 MB). On Linux and Windows `build_x265.sh` builds the encoder from source instead of taking the distribution package: those packages carry 8, 10 and 12-bit support, and the combined library is 17 MB on Ubuntu and 22 MB on MSYS2. The script builds only the two bit depths the presets use, links them into one shared library the way x265's own multilib build does, and statically links the C++ runtime so no `libstdc++` has to ship next to it. The result is about 12 MB on Linux.
+
 ### Collected layout
 
 ```
@@ -47,7 +51,7 @@ deployment/vendor/rust/<System>-<arch>/
 
 `collect_macos.py` copies non-system dylibs, rewrites install names to `@loader_path`, ad-hoc signs every Mach-O file, and verifies that both binaries start.
 
-`collect_linux.py` copies the FFmpeg sonames and non-glibc dependencies, sets an `$ORIGIN/../lib` runpath with `patchelf`, strips the ELF symbol tables, and verifies both binaries start.
+`collect_linux.py` copies the FFmpeg sonames and non-glibc dependencies, sets an `$ORIGIN/../lib` runpath with `patchelf`, strips the ELF symbol tables, and verifies both binaries start. glibc libraries (`libc`, `libm`, `libmvec`, the loader) are never copied: they must match the host.
 
 `build_minimal_windows.sh` copies every non-system DLL next to the executables because Windows resolves them from the executable folder, then strips the PE files. The ELF and PE installs keep large symbol tables that would otherwise break the size budget.
 

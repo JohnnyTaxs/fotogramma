@@ -20,6 +20,7 @@ from pathlib import Path
 SYSTEM_NAMES = (
     "libc.so",
     "libm.so",
+    "libmvec.so",
     "libdl.so",
     "libpthread.so",
     "librt.so",
@@ -32,8 +33,8 @@ SYSTEM_NAMES = (
 SONAME = re.compile(r"\.so\.\d+$")
 
 
-def run(*args: str) -> str:
-    result = subprocess.run(args, capture_output=True, text=True, check=False)
+def run(*args: str, env: dict[str, str] | None = None) -> str:
+    result = subprocess.run(args, capture_output=True, text=True, check=False, env=env)
     if result.returncode != 0:
         raise RuntimeError(f"{' '.join(args)}: {result.stderr.strip()}")
     return result.stdout
@@ -43,9 +44,9 @@ def is_system(name: str) -> bool:
     return name.startswith(SYSTEM_NAMES) or name.startswith("ld-linux")
 
 
-def dependencies(binary: Path) -> list[Path]:
+def dependencies(binary: Path, env: dict[str, str]) -> list[Path]:
     found = []
-    for line in run("ldd", str(binary)).splitlines():
+    for line in run("ldd", str(binary), env=env).splitlines():
         line = line.strip()
         if "=>" not in line:
             continue
@@ -55,7 +56,9 @@ def dependencies(binary: Path) -> list[Path]:
     return found
 
 
-def collect_shared_objects(source: Path, destination: Path) -> dict[str, Path]:
+def collect_shared_objects(
+    source: Path, destination: Path, env: dict[str, str]
+) -> dict[str, Path]:
     """Copy FFmpeg's own sonames, then every non-glibc dependency."""
     collected: dict[str, Path] = {}
     for item in source.iterdir():
@@ -75,7 +78,7 @@ def collect_shared_objects(source: Path, destination: Path) -> dict[str, Path]:
     pending.extend(collected.values())
     while pending:
         current = pending.pop()
-        for dependency in dependencies(current):
+        for dependency in dependencies(current, env):
             name = dependency.name
             if is_system(name) or name in collected:
                 continue
@@ -95,6 +98,21 @@ def main() -> int:
         if not binary.is_file():
             raise SystemExit(f"Missing FFmpeg binary: {binary}")
 
+    # Libraries that FFmpeg linked against from a build-only prefix (the slim
+    # x265, for example) are not installed next to FFmpeg, so let the loader
+    # resolve them while the dependencies are being collected.
+    libdirs = [str(prefix / "lib")]
+    libdirs.extend(
+        part
+        for part in os.environ.get("FOTOGRAMMA_EXTRA_LIBDIRS", "").split(os.pathsep)
+        if part
+    )
+    env = dict(os.environ)
+    inherited = env.get("LD_LIBRARY_PATH", "")
+    if inherited:
+        libdirs.append(inherited)
+    env["LD_LIBRARY_PATH"] = os.pathsep.join(libdirs)
+
     if destination.exists():
         shutil.rmtree(destination)
     (destination / "bin").mkdir(parents=True)
@@ -102,7 +120,7 @@ def main() -> int:
     for binary in binaries:
         shutil.copy2(binary, destination / "bin" / binary.name)
 
-    collected = collect_shared_objects(prefix / "lib", destination)
+    collected = collect_shared_objects(prefix / "lib", destination, env)
     for name, path in collected.items():
         shutil.copy2(path, destination / "lib" / name)
 

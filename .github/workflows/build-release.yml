@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config nasm patchelf libx265-dev \
+            build-essential pkg-config nasm cmake patchelf \
             libgl1-mesa-dev libegl1-mesa-dev libgl1-mesa-dri \
             mesa-vulkan-drivers libx11-dev libxi-dev \
             libxkbcommon-dev libwayland-dev libxrandr-dev libxcursor-dev \
@@ -176,10 +176,10 @@ jobs:
           install: >-
             make
             curl
+            cmake
             mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-nasm
             mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-x265
 
       - name: Build minimal FFmpeg
         shell: msys2 {0}

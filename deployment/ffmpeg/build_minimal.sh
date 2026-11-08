@@ -29,6 +29,27 @@ if [ ! -d "$SRC" ]; then
   tar -xf "$WORK/ffmpeg-$VERSION.tar.xz" -C "$WORK"
 fi
 
+X265_VERSION="${X265_VERSION:-4.3}"
+X265_PREFIX=""
+
+case "$(uname -s)" in
+  Darwin)
+    # Homebrew's x265 is a 7 MB arm64 build; rebuilding it would not save
+    # anything, so the packaged macOS toolchain keeps using it.
+    ;;
+  Linux)
+    # Distributions ship x265 with 8, 10 and 12-bit support (16 MB). Build a
+    # slim 8+10-bit library instead: it is the only bit-depth pair the
+    # application offers, and FFmpeg links it through pkg-config.
+    X265_PREFIX="$WORK/x265-$X265_VERSION"
+    if [ ! -f "$X265_PREFIX/lib/pkgconfig/x265.pc" ]; then
+      "$HERE/build_x265.sh" "$X265_PREFIX"
+    fi
+    export PKG_CONFIG_PATH="$X265_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    export FOTOGRAMMA_EXTRA_LIBDIRS="$X265_PREFIX/lib${FOTOGRAMMA_EXTRA_LIBDIRS:+:$FOTOGRAMMA_EXTRA_LIBDIRS}"
+    ;;
+esac
+
 cd "$SRC"
 
 COMMON=(

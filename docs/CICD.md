@@ -18,10 +18,10 @@ The workflow `.github/workflows/build-release.yml` runs on every push to `main` 
 2. `dtolnay/rust-toolchain@stable`.
 3. `Swatinem/rust-cache@v2` for the workspace.
 4. Platform build dependencies:
-   - Linux: `build-essential`, `pkg-config`, `nasm`, `patchelf`, `libx265-dev`, OpenGL, Mesa drivers (for the headless wgpu snapshots), X11, xkbcommon, and Wayland development packages.
+   - Linux: `build-essential`, `pkg-config`, `nasm`, `cmake`, `patchelf`, OpenGL, Mesa drivers (for the headless wgpu snapshots), X11, xkbcommon, and Wayland development packages.
    - macOS ARM: `x265` and `pkgconf` through Homebrew.
-   - Windows: MSYS2 with `mingw-w64-x86_64-toolchain`, `nasm`, `pkgconf`, and `x265`.
-5. `deployment/ffmpeg/build_minimal.sh` (or `build_minimal_windows.sh`) downloads FFmpeg 9.0.2, configures the minimal component list, builds it, and collects the relocatable toolchain into `deployment/vendor/rust/<System>-<arch>/`.
+   - Windows: MSYS2 with `mingw-w64-x86_64-toolchain`, `nasm`, `cmake`, and `pkgconf`.
+5. `deployment/ffmpeg/build_minimal.sh` (or `build_minimal_windows.sh`) downloads FFmpeg 9.0.2, configures the minimal component list, builds it, and collects the relocatable toolchain into `deployment/vendor/rust/<System>-<arch>/`. Linux and Windows first call `deployment/ffmpeg/build_x265.sh`, which builds a slim 8-bit + 10-bit x265 with a static C++ runtime instead of using the distribution package.
 6. `cargo test --workspace --locked`.
 7. The two real-pipeline tests again with `FOTOGRAMMA_FFMPEG_DIR` pointing at the freshly built tools.
 8. `deployment/build_rust.py`: release build, bundle, ad-hoc signature (macOS), ZIP, round-trip verification, and the 35 MB / 18 MB size budget.
