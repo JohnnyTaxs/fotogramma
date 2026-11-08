@@ -29,7 +29,7 @@ The portable archives are an order of magnitude smaller than the Qt/Python 1.x b
 | macOS application | 106 MB | 22.4 MB |
 | macOS ZIP | 44 MB | 10.0 MB |
 
-The bundle contains the Rust binary, the original icon, and a purpose-built FFmpeg with only the containers, codecs, and filters the app uses. CI fails the build if the application exceeds 35 MB or the ZIP exceeds 18 MB.
+The bundle contains the Rust binary, the original icon, and a purpose-built FFmpeg with only the containers, codecs, and filters the app uses. CI fails the build if the application exceeds 45 MB or the ZIP exceeds 18 MB.
 
 ## Conversion presets
 

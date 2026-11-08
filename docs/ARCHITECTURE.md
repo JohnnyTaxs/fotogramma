@@ -120,7 +120,7 @@ The window shows the initial composition summary, the results table after a scan
 - Linux: `Fotogramma/` with the binary, `bin/ffmpeg`, `bin/ffprobe`, and `lib/` shared objects; the tools carry an `$ORIGIN/../lib` runpath.
 - Windows: `Fotogramma/` with `fotogramma.exe`, `bin/ffmpeg.exe`, `bin/ffprobe.exe`, and the required DLLs.
 
-The build fails when the application exceeds 35 MB or the ZIP exceeds 18 MB.
+The build fails when the application exceeds 45 MB or the ZIP exceeds 18 MB.
 
 ## Testing
 

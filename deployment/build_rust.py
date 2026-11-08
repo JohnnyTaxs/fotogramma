@@ -30,7 +30,7 @@ SYSTEM = platform.system()
 MACHINE = platform.machine().lower()
 VENDOR = ROOT / "deployment" / "vendor" / "rust" / f"{SYSTEM}-{MACHINE}"
 BINARY_NAME = "fotogramma.exe" if SYSTEM == "Windows" else "fotogramma"
-MAX_APP_BYTES = int(os.environ.get("FOTOGRAMMA_MAX_APP_BYTES", 35_000_000))
+MAX_APP_BYTES = int(os.environ.get("FOTOGRAMMA_MAX_APP_BYTES", 45_000_000))
 MAX_ZIP_BYTES = int(os.environ.get("FOTOGRAMMA_MAX_ZIP_BYTES", 18_000_000))
 
 

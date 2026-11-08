@@ -11,7 +11,7 @@ Operational guide for agents modifying **Fotogramma Desktop** (v2, Rust). The we
 - No CDN or online service is required at runtime.
 - `settings.toml` stores only the directory and window size, not scan results.
 - Build **onedir** for each OS/architecture, never onefile and never cross-compiled.
-- The packaged app must stay within **35 MB** with a ZIP within **18 MB**.
+- The packaged app must stay within **45 MB** with a ZIP within **18 MB**.
 
 ## Commands
 
