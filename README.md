@@ -11,6 +11,15 @@ It is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no brows
 
 > **Personal project:** Fotogramma was created primarily for my own use. It is shared in the hope that it may also be useful to others. **It is provided “AS IS”, without any warranty of any kind, express or implied, including but not limited to correctness, reliability, fitness for a particular purpose, non-infringement, availability, security, or data integrity. Use it at your own risk. You are solely responsible for backups and for validating converted or replaced files.**
 
+## Why Fotogramma exists
+
+Many tools already transcode video, from HandBrake to automated library transcoders such as Tdarr or Unmanic. Fotogramma does not try to replace them. It exists for two things they do not do the way I wanted:
+
+- **Control over each transcode.** Automated, bulk-oriented tools decide for you and run through the whole library on their own, which is the right trade-off for some setups and the wrong one when you care about individual files. Here you pick the files, the preset (or every x265 parameter), the content type, the audio, the container, and where the result goes, and you see the exact FFmpeg command before it runs. Nothing is converted unless you start it, originals are never overwritten by default, and replacing one is an explicit, fully verified step with a backup.
+- **Finding what is not H.265 yet, fast, in a huge library.** Scanning reads only the first video stream with `ffprobe`, so a library of thousands of files is sorted into *to convert*, *already compatible*, and *unreadable* in one pass, with filters, search, and sorting to isolate the leftovers (the old H.264 episodes that slipped past, one folder, one show).
+
+It is a small native desktop app, not a service: no server, no database, no account, nothing to deploy next to your media stack.
+
 ## Features
 
 - Native desktop window for macOS, Windows, and Linux.
