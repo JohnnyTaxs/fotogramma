@@ -110,6 +110,7 @@ class CreateReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             Path(directory, "Fotogramma-Linux-x86_64.zip").write_bytes(b"linux")
             Path(directory, "Fotogramma-Windows-amd64.zip").write_bytes(b"windows")
+            Path(directory, "Fotogramma-Darwin-arm64.dmg").write_bytes(b"dmg")
             env = {
                 "GITHUB_TOKEN": "secret-token",
                 "GITHUB_API_URL": f"http://127.0.0.1:{self.port}/api/v3",
@@ -123,7 +124,11 @@ class CreateReleaseTests(unittest.TestCase):
                 with redirect_stdout(output):
                     create_release()
                     create_release()
-        self.assertEqual(len(ReleaseHandler.assets), 2)
+        names = sorted(asset["name"] for asset in ReleaseHandler.assets)
+        self.assertEqual(
+            names,
+            ["Fotogramma-Darwin-arm64.dmg", "Fotogramma-Linux-x86_64.zip", "Fotogramma-Windows-amd64.zip", "SHA256SUMS.txt"],
+        )
         self.assertNotIn("secret-token", output.getvalue())
         self.assertEqual(ReleaseHandler.release["tag_name"], "v1.0.0")
 
@@ -150,6 +155,18 @@ class CreateReleaseTests(unittest.TestCase):
                 notes.write_text("# Note\n\nUpdated body.", encoding="utf-8")
                 create_release()
         self.assertEqual(ReleaseHandler.release["body"], "# Note\n\nUpdated body.")
+
+
+    def test_checksums_cover_every_asset_in_sha256sum_format(self):
+        import hashlib
+        from deployment.create_release import write_checksums
+
+        with tempfile.TemporaryDirectory() as directory:
+            zip_file = Path(directory, "Fotogramma-Linux-x86_64.zip")
+            zip_file.write_bytes(b"linux")
+            sums = write_checksums([zip_file], Path(directory))
+            lines = sums.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(lines, [f"{hashlib.sha256(b'linux').hexdigest()}  Fotogramma-Linux-x86_64.zip"])
 
 
 if __name__ == "__main__":

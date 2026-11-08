@@ -8,6 +8,7 @@ use fotogramma_core::conversion::{
 use fotogramma_core::i18n::tr_str;
 use fotogramma_core::media_tools::{ffmpeg_path, ffprobe_path, prepare_command};
 use fotogramma_core::scanner::{discover_videos, probe_videos, DiscoveryWarning, VideoInfo};
+use fotogramma_core::update::{self, InstallTarget, Release};
 use fotogramma_core::verification::{replace_verified_output, validate_conversion_output};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
@@ -461,4 +462,67 @@ fn convert_one(
         verified: false,
         replaced: false,
     }
+}
+
+pub enum CheckMessage {
+    Available(Box<Release>),
+    UpToDate,
+    Failed(String),
+}
+
+/// Ask GitHub whether a newer release exists. Runs once, off the GUI thread.
+pub fn spawn_update_check(current: &'static str, ctx: egui::Context) -> Receiver<CheckMessage> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let message = match update::check(current) {
+            Ok(Some(release)) => CheckMessage::Available(Box::new(release)),
+            Ok(None) => CheckMessage::UpToDate,
+            Err(error) => CheckMessage::Failed(error),
+        };
+        let _ = sender.send(message);
+        ctx.request_repaint();
+    });
+    receiver
+}
+
+pub enum InstallMessage {
+    Progress {
+        done: u64,
+        total: u64,
+    },
+    /// The new copy is unpacked and verified, waiting for the restart.
+    Staged(std::path::PathBuf),
+    Failed(String),
+}
+
+/// Download, verify and unpack a release next to the installed copy.
+pub fn spawn_update_install(
+    release: Release,
+    target: InstallTarget,
+    cancel: Arc<AtomicBool>,
+    ctx: egui::Context,
+) -> Receiver<InstallMessage> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let directory =
+            std::env::temp_dir().join(format!("fotogramma-update-{}", std::process::id()));
+        let mut last_percent = u64::MAX;
+        let mut report = |done: u64, total: u64| {
+            let percent = (done * 100).checked_div(total).unwrap_or(0);
+            if percent != last_percent {
+                last_percent = percent;
+                let _ = sender.send(InstallMessage::Progress { done, total });
+                ctx.request_repaint();
+            }
+        };
+        let result = update::download(&release, &directory, &cancel, &mut report)
+            .and_then(|archive| update::stage(&archive, &target));
+        let _ = std::fs::remove_dir_all(&directory);
+        let _ = sender.send(match result {
+            Ok(staged) => InstallMessage::Staged(staged),
+            Err(error) => InstallMessage::Failed(error),
+        });
+        ctx.request_repaint();
+    });
+    receiver
 }

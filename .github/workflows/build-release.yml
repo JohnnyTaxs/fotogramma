@@ -120,8 +120,15 @@ jobs:
           FOTOGRAMMA_FFMPEG_DIR: ${{ github.workspace }}/deployment/vendor/rust/Darwin-arm64/bin
         run: cargo test -p fotogramma-core --test conversion_pipeline --locked
 
-      - name: Build portable app
-        run: python3 deployment/build_rust.py
+      - name: Install dmgbuild
+        run: |
+          python3 -m venv "$RUNNER_TEMP/dmg-venv"
+          "$RUNNER_TEMP/dmg-venv/bin/pip" install dmgbuild
+
+      - name: Build portable app and disk image
+        env:
+          FOTOGRAMMA_REQUIRE_DMG: "1"
+        run: '"$RUNNER_TEMP/dmg-venv/bin/python" deployment/build_rust.py'
 
       - name: Scan with the bundled tools and a clean PATH
         run: |
@@ -146,11 +153,13 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
-      - name: Upload portable ZIP
+      - name: Upload ZIP and DMG
         uses: actions/upload-artifact@v4
         with:
           name: fotogramma-macos-arm
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.dmg
           if-no-files-found: error
           retention-days: 3
 
@@ -231,6 +240,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+
+      - name: Test the release uploader
+        run: python -m unittest tests.test_create_release
 
       - name: Create or update GitHub release
         env:

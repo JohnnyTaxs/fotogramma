@@ -67,10 +67,22 @@ The script:
 2. runs `cargo build --release --locked -p fotogramma`;
 3. assembles the platform bundle;
 4. creates `dist/Fotogramma-<System>-<arch>.zip`;
+   on macOS it also creates `dist/Fotogramma-Darwin-arm64.dmg` (see below);
 5. on macOS, extracts the ZIP again and runs `codesign --verify --deep --strict` on both copies;
 6. fails if the app exceeds 45 MB or the ZIP exceeds 18 MB.
 
 Set `FOTOGRAMMA_RUST_SKIP_BUILD=1` to reuse an existing release binary.
+
+### macOS disk image
+
+The DMG shows the app and an *Applications* shortcut over a branded background with an arrow. It is built with [`dmgbuild`](https://pypi.org/project/dmgbuild/), which writes the window layout (`.DS_Store`) directly: no Finder or AppleScript session is needed, so it works on a headless CI runner.
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install dmgbuild
+FOTOGRAMMA_REQUIRE_DMG=1 .venv/bin/python deployment/build_rust.py
+```
+
+Without `dmgbuild` the script skips the DMG with a warning, unless `FOTOGRAMMA_REQUIRE_DMG=1` (CI). The script mounts the image and checks the app, the `/Applications` symlink, the layout file and the code signature. `deployment/dmg/background.png` and `background@2x.png` come from `deployment/dmg/make_background.py` (needs Pillow); the icon slots in that script and in `build_rust.py` must stay in step. The ZIP is still published because the in-app updater installs it.
 
 ### Layouts
 

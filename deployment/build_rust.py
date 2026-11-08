@@ -6,9 +6,13 @@ packages the matching vendored FFmpeg toolchain from
 
     python3 deployment/build_rust.py
 
+On macOS it also writes a drag-to-Applications ``.dmg`` (needs
+``pip install dmgbuild``); the ZIP stays because the self-updater installs it.
+
 Environment:
     FOTOGRAMMA_VERSION   overrides the version embedded in the bundle
     FOTOGRAMMA_RUST_SKIP_BUILD  set to 1 to reuse an existing release binary
+    FOTOGRAMMA_REQUIRE_DMG      set to 1 to fail when the DMG cannot be built
 """
 
 from __future__ import annotations
@@ -32,6 +36,12 @@ VENDOR = ROOT / "deployment" / "vendor" / "rust" / f"{SYSTEM}-{MACHINE}"
 BINARY_NAME = "fotogramma.exe" if SYSTEM == "Windows" else "fotogramma"
 MAX_APP_BYTES = int(os.environ.get("FOTOGRAMMA_MAX_APP_BYTES", 45_000_000))
 MAX_ZIP_BYTES = int(os.environ.get("FOTOGRAMMA_MAX_ZIP_BYTES", 18_000_000))
+MAX_DMG_BYTES = int(os.environ.get("FOTOGRAMMA_MAX_DMG_BYTES", 18_000_000))
+DMG_DIR = ROOT / "deployment" / "dmg"
+# Icon slots in the DMG window; they match the arrow in background.png.
+DMG_WINDOW = (660, 400)
+DMG_APP_POSITION = (165, 205)
+DMG_APPLICATIONS_POSITION = (495, 205)
 
 
 def workspace_version() -> str:
@@ -200,6 +210,83 @@ def verify_macos_archive(artifact: Path, archive: Path) -> None:
                 raise RuntimeError(f"Archive is missing {relative}")
 
 
+def build_dmg(app: Path, version: str) -> Path | None:
+    """A disk image with the app and an Applications shortcut to drag it onto."""
+    try:
+        import dmgbuild
+    except ImportError:
+        if os.environ.get("FOTOGRAMMA_REQUIRE_DMG") == "1":
+            raise RuntimeError("dmgbuild is required: pip install dmgbuild")
+        print("dmgbuild is not installed: skipping the DMG (pip install dmgbuild)")
+        return None
+
+    dmg = DIST / f"Fotogramma-{SYSTEM}-{MACHINE}.dmg"
+    dmg.unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory() as directory:
+        # One TIFF with both resolutions, so the background stays sharp on Retina.
+        background = Path(directory) / "background.tiff"
+        subprocess.run(
+            [
+                "tiffutil",
+                "-cathidpicheck",
+                str(DMG_DIR / "background.png"),
+                str(DMG_DIR / "background@2x.png"),
+                "-out",
+                str(background),
+            ],
+            check=True,
+        )
+        settings = {
+            "format": "UDZO",
+            "compression_level": 9,
+            "files": [str(app)],
+            "symlinks": {"Applications": "/Applications"},
+            "icon": str(ROOT / "deployment" / "Fotogramma.icns"),
+            "background": str(background),
+            "icon_size": 128,
+            "text_size": 13,
+            "window_rect": ((200, 140), DMG_WINDOW),
+            "default_view": "icon-view",
+            "show_icon_preview": False,
+            "show_status_bar": False,
+            "show_tab_view": False,
+            "show_toolbar": False,
+            "show_pathbar": False,
+            "show_sidebar": False,
+            "arrange_by": None,
+            "icon_locations": {
+                app.name: DMG_APP_POSITION,
+                "Applications": DMG_APPLICATIONS_POSITION,
+            },
+        }
+        dmgbuild.build_dmg(str(dmg), "Fotogramma", settings=settings)
+    return dmg
+
+
+def verify_dmg(dmg: Path) -> None:
+    """Mount the image and check what a user will see and drag."""
+    with tempfile.TemporaryDirectory() as directory:
+        mountpoint = Path(directory) / "volume"
+        mountpoint.mkdir()
+        subprocess.run(
+            ["hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", str(mountpoint), str(dmg)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        try:
+            app = mountpoint / "Fotogramma.app"
+            link = mountpoint / "Applications"
+            if not (app / "Contents" / "MacOS" / "fotogramma").is_file():
+                raise RuntimeError("The DMG does not contain Fotogramma.app")
+            if not link.is_symlink() or os.readlink(link) != "/Applications":
+                raise RuntimeError("The DMG has no Applications shortcut")
+            if not (mountpoint / ".DS_Store").is_file():
+                raise RuntimeError("The DMG window layout (.DS_Store) is missing")
+            subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+        finally:
+            subprocess.run(["hdiutil", "detach", "-force", str(mountpoint)], check=False, stdout=subprocess.DEVNULL)
+
+
 def report_largest(artifact: Path, count: int = 12) -> None:
     """Show what dominates the bundle, so a budget failure is actionable."""
     files = sorted(
@@ -244,6 +331,15 @@ def main() -> int:
     if SYSTEM == "Darwin":
         verify_macos_archive(artifact, archive)
     enforce_budget(artifact, archive)
+    if SYSTEM == "Darwin":
+        dmg = build_dmg(artifact, version)
+        if dmg is not None:
+            verify_dmg(dmg)
+            dmg_bytes = dmg.stat().st_size
+            print(f"DMG: {dmg_bytes / 1_000_000:.1f} MB (budget {MAX_DMG_BYTES / 1_000_000:.0f} MB)")
+            if dmg_bytes > MAX_DMG_BYTES:
+                raise RuntimeError("DMG exceeds the size budget")
+            print(f"Disk image: {dmg}")
     print(f"Version: {version}")
     print(f"Bundle: {artifact}")
     print(f"Archive: {archive}")

@@ -14,8 +14,9 @@ use std::sync::Arc;
 
 use crate::settings::{Settings, KNOWN_CODECS};
 use crate::theme;
-use crate::worker::{ConversionMessage, ConversionResult};
+use crate::worker::{ConversionMessage, ConversionResult, InstallMessage};
 use fotogramma_core::i18n::tr_str;
+use fotogramma_core::update::{InstallTarget, Release};
 
 fn audio_options() -> [(&'static str, Option<u32>); 4] {
     [
@@ -1005,11 +1006,13 @@ impl ConversionSession {
 /// window was closed.
 pub struct SettingsOutcome {
     pub changed: bool,
+    pub check_now: bool,
     pub closed: bool,
 }
 
 pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOutcome {
     let mut changed = false;
+    let mut check_now = false;
     let mut closed = false;
     let modal = egui::Modal::new(egui::Id::unique("settings-dialog"))
         .frame(modal_frame())
@@ -1031,6 +1034,11 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
             );
             ui.add_space(8.0);
 
+            let max_height = (ctx.content_rect().height() - 190.0).max(240.0);
+            egui::ScrollArea::vertical()
+                .max_height(max_height)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
             ui.horizontal(|ui| {
                 let language_label = ui.label(RichText::new(tr_str("Lingua", "Language")).strong());
                 egui::ComboBox::from_id_salt("settings-language")
@@ -1156,6 +1164,39 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
                     ui.end_row();
                 });
 
+            ui.add_space(8.0);
+            ui.label(RichText::new(tr_str("Aggiornamenti", "Updates")).strong());
+            ui.horizontal(|ui| {
+                if ui
+                    .checkbox(
+                        &mut settings.check_updates,
+                        tr_str(
+                            "Cerca aggiornamenti all’avvio",
+                            "Check for updates at startup",
+                        ),
+                    )
+                    .changed()
+                {
+                    changed = true;
+                }
+                if ui
+                    .add(theme::secondary_button(tr_str("Controlla ora", "Check now")))
+                    .clicked()
+                {
+                    check_now = true;
+                }
+            });
+            ui.label(
+                RichText::new(tr_str(
+                    "Contatta solo GitHub per leggere l’ultima versione. Nessun dato sulla libreria viene inviato.",
+                    "Only contacts GitHub to read the latest version. Nothing about your library is sent.",
+                ))
+                .small()
+                .color(theme::MUTED),
+            );
+
+                });
+
             ui.add_space(10.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
@@ -1181,5 +1222,235 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
     if modal.should_close() {
         closed = true;
     }
-    SettingsOutcome { changed, closed }
+    SettingsOutcome {
+        changed,
+        check_now,
+        closed,
+    }
+}
+
+/// What the update window is showing.
+pub enum UpdateStage {
+    Available,
+    Downloading {
+        done: u64,
+        total: u64,
+    },
+    /// Unpacked and verified; waiting for the restart.
+    Ready(PathBuf),
+    Failed(String),
+}
+
+pub struct UpdateDialog {
+    pub release: Release,
+    pub stage: UpdateStage,
+    pub target: Option<InstallTarget>,
+    pub receiver: Option<Receiver<InstallMessage>>,
+    pub cancel: Arc<AtomicBool>,
+}
+
+pub enum UpdateAction {
+    None,
+    Install,
+    Cancel,
+    Restart,
+    Later,
+    Skip,
+}
+
+impl UpdateDialog {
+    pub fn new(release: Release, target: Option<InstallTarget>) -> Self {
+        Self {
+            release,
+            stage: UpdateStage::Available,
+            target,
+            receiver: None,
+            cancel: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Whether this copy can replace itself with the release.
+    pub fn can_install(&self) -> bool {
+        self.target.is_some() && self.release.package.is_some() && self.release.sums_url.is_some()
+    }
+
+    pub fn poll(&mut self) {
+        let Some(receiver) = &self.receiver else {
+            return;
+        };
+        while let Ok(message) = receiver.try_recv() {
+            self.stage = match message {
+                InstallMessage::Progress { done, total } => {
+                    UpdateStage::Downloading { done, total }
+                }
+                InstallMessage::Staged(path) => UpdateStage::Ready(path),
+                InstallMessage::Failed(error) => UpdateStage::Failed(error),
+            };
+        }
+    }
+}
+
+/// The "new version available" window. `busy` is true while a scan or a
+/// conversion runs: the restart is held back until they end.
+pub fn show_update(ctx: &egui::Context, dialog: &mut UpdateDialog, busy: bool) -> UpdateAction {
+    let mut action = UpdateAction::None;
+    let modal = egui::Modal::new(egui::Id::unique("update-dialog"))
+        .frame(modal_frame())
+        .show(ctx, |ui| {
+            ui.set_min_width(560.0);
+            ui.set_max_width(640.0);
+            ui.label(
+                RichText::new(tr_str("Aggiornamento disponibile", "Update available"))
+                    .size(21.0)
+                    .strong(),
+            );
+            ui.label(fotogramma_core::tr!(
+                "Versione attuale {} · nuova versione {}",
+                "Current version {} · new version {}",
+                env!("CARGO_PKG_VERSION"),
+                dialog.release.version
+            ));
+            ui.add_space(4.0);
+            let notes = if dialog.release.notes.is_empty() {
+                tr_str("Nessuna nota di rilascio.", "No release notes.").to_string()
+            } else {
+                dialog.release.notes.chars().take(4000).collect()
+            };
+            egui::ScrollArea::vertical()
+                .max_height(220.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.label(RichText::new(notes).small().color(theme::MUTED));
+                });
+            ui.add_space(6.0);
+
+            if !dialog.can_install() {
+                let hint = ui.label(
+                    RichText::new(tr_str(
+                        "Questa copia non può aggiornarsi da sola: scarica la nuova versione da",
+                        "This copy cannot update itself: download the new version from",
+                    ))
+                    .small(),
+                );
+                let mut page = dialog.release.page_url.clone();
+                ui.add(
+                    egui::TextEdit::singleline(&mut page)
+                        .font(theme::mono(10.0))
+                        .desired_width(f32::INFINITY),
+                )
+                .labelled_by(hint.id);
+            }
+
+            match &dialog.stage {
+                UpdateStage::Available => {}
+                UpdateStage::Downloading { done, total } => {
+                    let fraction = if *total == 0 {
+                        0.0
+                    } else {
+                        (*done as f32 / *total as f32).min(1.0)
+                    };
+                    ui.add(
+                        egui::ProgressBar::new(fraction)
+                            .desired_height(10.0)
+                            .fill(theme::CORAL)
+                            .text(format!("{}%", (fraction * 100.0).round() as u32)),
+                    );
+                    ui.label(
+                        RichText::new(tr_str(
+                            "Download e verifica in corso…",
+                            "Downloading and verifying…",
+                        ))
+                        .small()
+                        .color(theme::MUTED),
+                    );
+                }
+                UpdateStage::Ready(_) => {
+                    ui.label(
+                        RichText::new(tr_str(
+                            "Scaricato e verificato. Riavvia per completare l’aggiornamento.",
+                            "Downloaded and verified. Restart to finish the update.",
+                        ))
+                        .color(theme::MINT),
+                    );
+                    if busy {
+                        ui.label(
+                            RichText::new(tr_str(
+                                "Termina o interrompi l’analisi o la conversione in corso.",
+                                "Finish or stop the running scan or conversion first.",
+                            ))
+                            .small()
+                            .color(theme::CORAL_HOVER),
+                        );
+                    }
+                }
+                UpdateStage::Failed(error) => {
+                    ui.label(RichText::new(error).color(theme::ERROR));
+                }
+            }
+
+            ui.add_space(8.0);
+            ui.with_layout(
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| match &dialog.stage {
+                    UpdateStage::Available | UpdateStage::Failed(_) => {
+                        if ui
+                            .add_enabled(
+                                dialog.can_install(),
+                                theme::primary_button(tr_str(
+                                    "Aggiorna e riavvia",
+                                    "Update and restart",
+                                )),
+                            )
+                            .clicked()
+                        {
+                            action = UpdateAction::Install;
+                        }
+                        if ui
+                            .add(theme::secondary_button(tr_str("Più tardi", "Later")))
+                            .clicked()
+                        {
+                            action = UpdateAction::Later;
+                        }
+                        if ui
+                            .add(theme::secondary_button(tr_str(
+                                "Salta questa versione",
+                                "Skip this version",
+                            )))
+                            .clicked()
+                        {
+                            action = UpdateAction::Skip;
+                        }
+                    }
+                    UpdateStage::Downloading { .. } => {
+                        if ui
+                            .add(theme::secondary_button(tr_str("Annulla", "Cancel")))
+                            .clicked()
+                        {
+                            action = UpdateAction::Cancel;
+                        }
+                    }
+                    UpdateStage::Ready(_) => {
+                        if ui
+                            .add_enabled(
+                                !busy,
+                                theme::primary_button(tr_str("Riavvia ora", "Restart now")),
+                            )
+                            .clicked()
+                        {
+                            action = UpdateAction::Restart;
+                        }
+                        if ui
+                            .add(theme::secondary_button(tr_str("Più tardi", "Later")))
+                            .clicked()
+                        {
+                            action = UpdateAction::Later;
+                        }
+                    }
+                },
+            );
+        });
+    if modal.should_close() && matches!(action, UpdateAction::None) {
+        action = UpdateAction::Later;
+    }
+    action
 }

@@ -24,16 +24,17 @@ The workflow `.github/workflows/build-release.yml` runs on every push to `main`,
 5. `deployment/ffmpeg/build_minimal.sh` (or `build_minimal_windows.sh`) downloads FFmpeg 9.0.2, configures the minimal component list, builds it, and collects the relocatable toolchain into `deployment/vendor/rust/<System>-<arch>/`. Linux and Windows first call `deployment/ffmpeg/build_x265.sh`, which builds a slim 8-bit + 10-bit x265 with a static C++ runtime instead of using the distribution package.
 6. `cargo clippy --workspace --all-targets --locked -- -D warnings` (Linux job), then `cargo test --workspace --locked`.
 7. The two real-pipeline tests again with `FOTOGRAMMA_FFMPEG_DIR` pointing at the freshly built tools.
-8. `deployment/build_rust.py`: release build, bundle, ad-hoc signature (macOS), ZIP, round-trip verification, and the 45 MB / 18 MB size budget.
+8. `deployment/build_rust.py`: release build, bundle, ad-hoc signature (macOS), ZIP, round-trip verification, and the 45 MB / 18 MB size budget. On macOS the job first installs `dmgbuild` in a virtualenv and the script also builds, mounts and verifies the `.dmg` (app, Applications shortcut, window layout, code signature, 18 MB budget).
 9. Linux and macOS also generate a tiny clip with the bundled FFmpeg and scan it with a clean `PATH` to prove the packaged tools are used.
 10. `actions/upload-artifact@v4` with a 3-day retention.
 
 ## Release
 
-On a `v*` tag the `release` job downloads every ZIP and calls `deployment/create_release.py`. The script:
+On a `v*` tag the `release` job downloads every ZIP and DMG, runs the uploader's unit tests, and calls `deployment/create_release.py`. The script:
 
 - uses `GITHUB_TOKEN` with `GITHUB_API_URL` and `GITHUB_REPOSITORY`;
 - creates the release with the notes in `docs/releases/<tag>.md` when present;
+- publishes `SHA256SUMS.txt` with the SHA-256 of every asset: the in-app updater refuses a package that is not listed there;
 - deletes an asset with the same name before uploading, so re-running a tag does not duplicate files.
 
 Never print `GITHUB_TOKEN` or `FORGEJO_TOKEN`.

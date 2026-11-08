@@ -1,7 +1,12 @@
-"""Create or update a GitHub release and upload every ZIP asset via its API."""
+"""Create or update a GitHub release and upload every ZIP and DMG via its API.
+
+It also publishes ``SHA256SUMS.txt``: the self-updater refuses a download whose
+SHA-256 is not listed there.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +17,23 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTES_DIR = ROOT / "docs" / "releases"
+SUMS_NAME = "SHA256SUMS.txt"
+CONTENT_TYPES = {
+    ".zip": "application/zip",
+    ".dmg": "application/x-apple-diskimage",
+    ".txt": "text/plain",
+}
+
+
+def write_checksums(assets: list[Path], directory: Path) -> Path:
+    """Write a ``sha256sum``-style file covering every asset."""
+    lines = []
+    for asset in sorted(assets):
+        digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+        lines.append(f"{digest}  {asset.name}")
+    sums = directory / SUMS_NAME
+    sums.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return sums
 
 
 def release_notes(tag: str) -> str:
@@ -79,7 +101,7 @@ class ReleaseClient:
             "POST",
             f"{upload_url}?{query}",
             path.read_bytes(),
-            content_type="application/zip",
+            content_type=CONTENT_TYPES.get(path.suffix, "application/octet-stream"),
         )
 
 
@@ -95,9 +117,11 @@ def main() -> int:
     if not repository or not tag:
         raise SystemExit("GITHUB_REPOSITORY and GITHUB_REF_NAME are required")
 
-    assets = sorted(Path(sys.argv[1]).glob("*.zip"))
+    directory = Path(sys.argv[1])
+    assets = sorted([*directory.glob("*.zip"), *directory.glob("*.dmg")])
     if not assets:
         raise SystemExit("No ZIP archives to publish")
+    assets.append(write_checksums(assets, directory))
     client = ReleaseClient(api_url, repository, token)
     release = client.create_release(tag, release_notes(tag))
     for asset in assets:

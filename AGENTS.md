@@ -4,15 +4,16 @@ Operational guide for agents modifying **Fotogramma Desktop** (v2, Rust). The we
 
 ## Invariants
 
-- **Native desktop only** through `egui`/`eframe` with the `glow` (OpenGL) renderer. No HTTP server, Electron, Tauri, Qt, WebView, or external browser. The app makes no network request at runtime.
+- **Native desktop only** through `egui`/`eframe` with the `glow` (OpenGL) renderer. No HTTP server, Electron, Tauri, Qt, WebView, or external browser. **The only network request is the update check** (`fotogramma_core::update`): HTTPS to `api.github.com` and to this repository's release downloads, nothing about the library is ever sent, it can be switched off in Settings or with `FOTOGRAMMA_NO_UPDATE_CHECK`, and it never runs in tests or with `--smoke-test`. Do not add any other request.
 - **Default mode never overwrites originals.** Replacement is allowed only after HEVC, duration, stream, full-decode, and final-codec validation, with an atomic backup restored on failure.
 - By default `hevc` and `av1` are `compatible`; every other valid codec is `convert`; read failures are `error`. The user can change the accepted codecs in the settings window: the probe keeps the defaults and the app re-applies the list with `reclassify`, so a change never needs a new scan. Verification after a conversion still requires `hevc`.
 - Only the first video stream (`v:0`) of `.mp4`, `.mkv`, and `.webm` is analyzed.
-- No CDN or online service is required at runtime.
+- No CDN or online service is required at runtime; if GitHub is unreachable the app works exactly the same.
+- **Updates are verified before they are installed.** The package must be an asset of this repository's release, its SHA-256 must match `SHA256SUMS.txt` (published by `create_release.py`), and on macOS `codesign --verify` must pass before the swap. A development binary (`cargo run`) is never replaced. The swap runs in a helper script after the app quits and restores the old copy if the move fails.
 - **Two languages: Italian and English.** Every user-visible string goes through `tr_str` or `tr!` with both texts (never a bare literal), including messages built in `core` and on worker threads. The language is process-wide (`i18n::set_lang`); Italian is the default, `auto` follows the OS through `sys-locale`, and the Settings window can override it. Prefer "Label: {}" over "{} items" so no plural form is needed. Tests fix the system locale to `it-IT`; UI tests take the `lang_guard` lock, and English output is tested in `crates/core/tests/english.rs`.
 - `settings.toml` stores the directory, window size, language, accepted codecs, and conversion defaults (replace original, profile, container), never scan results.
-- Build **onedir** for each OS/architecture, never onefile and never cross-compiled.
-- The packaged app must stay within **45 MB** with a ZIP within **18 MB**.
+- Build **onedir** for each OS/architecture, never onefile and never cross-compiled. macOS also ships a drag-to-Applications `.dmg` (`dmgbuild`, background in `deployment/dmg/`); the ZIP stays because the updater installs it.
+- The packaged app must stay within **45 MB** with a ZIP (and the DMG) within **18 MB**.
 
 ## Commands
 
@@ -48,6 +49,7 @@ Linux and Windows build x265 with `deployment/ffmpeg/build_x265.sh` (8-bit + 10-
 | `crates/core/src/media_tools.rs` | ffmpeg/ffprobe resolution in source and packaged builds; `DYLD_LIBRARY_PATH` only on macOS. |
 | `crates/core/src/conversion.rs` | Profiles and FFmpeg arguments. Use `-n`, `-map 0`, and non-overwriting output. |
 | `crates/core/src/i18n.rs` | `Lang`, the process-wide language, `tr_str` and `tr!`. No other module may hardcode user-visible text in one language. |
+| `crates/core/src/update.rs` | Release check, verified download, staging, and the swap helper. The only module that uses the network. |
 | `crates/core/src/verification.rs` | Codec/duration/stream validation, full decode, and atomic backup replacement. |
 | `crates/app/src/app.rs` | Entry state, layout, selection, scan flow, smoke test, four snapshots. |
 | `crates/app/src/icon.rs` | Apply the bundled icon to the macOS Dock at startup. |

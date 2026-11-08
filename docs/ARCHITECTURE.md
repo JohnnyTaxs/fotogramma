@@ -26,7 +26,7 @@ eframe + egui (glow / OpenGL)
 
 ## Workspace
 
-`Cargo.toml` defines a two-crate workspace, version `2.3.0`:
+`Cargo.toml` defines a two-crate workspace, version `2.4.0`:
 
 | Crate | Responsibility |
 | --- | --- |
@@ -70,6 +70,12 @@ On macOS, `tool_environment()` points `DYLD_LIBRARY_PATH` at the tool folder whe
 ### `crates/core/src/i18n.rs`
 
 Italian and English. `Lang` resolves the setting (`auto`, `it`, `en`) against the system locale; the current language is a process-wide atomic because messages are produced on worker threads too. `tr_str(it, en)` picks a static string and `tr!(it, en, args…)` formats one. Number formats follow the language (`1.234,5` or `1,234.5`). `auto` maps `it*` locales to Italian and everything else to English.
+
+### `crates/core/src/update.rs`
+
+Self-update, the only code that touches the network. `check` reads the latest GitHub release and `pick_release` chooses this platform's archive (`Fotogramma-<System>-<arch>.zip`), accepting only assets under this repository's download URL. `download` streams the archive while hashing it and refuses it unless the SHA-256 equals the entry in `SHA256SUMS.txt`. `stage` unpacks it next to the installed copy (`ditto` on macOS, the zip crate elsewhere) so the final move is a rename, and on macOS checks the code signature. `spawn_swap` starts a detached helper (`sh` on macOS and Linux, `cmd` on Windows) that waits for the app to exit, renames the old copy aside, moves the new one in, restores the old one if that fails, and relaunches. `InstallTarget::detect` is `None` for a development binary, which is never replaced.
+
+The window in `dialogs.rs` shows the release notes, then *Update and restart*, *Later* or *Skip this version* (stored in `settings.toml`). The restart is held back while a scan or conversion runs.
 
 ### `crates/core/src/verification.rs`
 

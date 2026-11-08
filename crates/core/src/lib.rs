@@ -11,6 +11,7 @@ pub mod formatting;
 pub mod i18n;
 pub mod media_tools;
 pub mod scanner;
+pub mod update;
 pub mod verification;
 
 pub use scanner::{Category, ProbeError, Summary, VideoInfo};

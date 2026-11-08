@@ -18,14 +18,15 @@ use std::time::{Duration, Instant};
 
 use crate::dialogs::{
     self, CloseChoice, ConversionDialog, ConversionPlan, ConversionSession, DialogOutcome,
-    ProgressAction,
+    ProgressAction, UpdateAction, UpdateDialog, UpdateStage,
 };
 use crate::platform;
 use crate::settings::{Settings, KNOWN_CODECS};
 use crate::table::{self, FilterCategory, SortState, TableAction};
 use crate::theme;
-use crate::worker::{self, ScanMessage};
+use crate::worker::{self, CheckMessage, ScanMessage};
 use fotogramma_core::i18n::{set_lang, tr_str, Lang};
+use fotogramma_core::update::{self, InstallTarget};
 
 #[derive(Clone, Debug, PartialEq)]
 enum Page {
@@ -91,6 +92,10 @@ pub struct FotogrammaApp {
     started_at: Instant,
     last_size: Vec2,
     show_settings: bool,
+    update_check: Option<Receiver<CheckMessage>>,
+    update_manual: bool,
+    update: Option<UpdateDialog>,
+    install_target: Option<InstallTarget>,
     logo: Option<egui::TextureHandle>,
 }
 
@@ -148,12 +153,128 @@ impl FotogrammaApp {
             started_at: Instant::now(),
             last_size: Vec2::new(1280.0, 820.0),
             show_settings: false,
+            update_check: None,
+            update_manual: false,
+            update: None,
+            install_target: if cfg!(test) {
+                None
+            } else {
+                InstallTarget::detect()
+            },
             logo: load_logo(&cc.egui_ctx),
         };
+        if let Some(target) = &app.install_target {
+            // An update interrupted earlier may have left its staging folder.
+            update::clean_staging(target);
+        }
+        if app.settings.check_updates && updates_allowed(&app.args) {
+            app.start_update_check(&cc.egui_ctx, false);
+        }
         if app.args.scan_on_start {
             app.start_scan(&cc.egui_ctx);
         }
         app
+    }
+
+    fn start_update_check(&mut self, ctx: &egui::Context, manual: bool) {
+        if self.update_check.is_some() {
+            return;
+        }
+        self.update_manual = manual;
+        self.update_check = Some(worker::spawn_update_check(
+            env!("CARGO_PKG_VERSION"),
+            ctx.clone(),
+        ));
+    }
+
+    fn poll_update(&mut self) {
+        let Some(receiver) = &self.update_check else {
+            return;
+        };
+        let Ok(message) = receiver.try_recv() else {
+            return;
+        };
+        self.update_check = None;
+        let manual = self.update_manual;
+        match message {
+            CheckMessage::Available(release) => {
+                let skipped = self.settings.skipped_update == release.tag;
+                if (manual || !skipped) && self.update.is_none() {
+                    self.update = Some(UpdateDialog::new(*release, self.install_target.clone()));
+                }
+            }
+            CheckMessage::UpToDate if manual => self.set_status(
+                fotogramma_core::tr!(
+                    "Fotogramma è aggiornato ({})",
+                    "Fotogramma is up to date ({})",
+                    env!("CARGO_PKG_VERSION")
+                ),
+                Duration::from_secs(5),
+            ),
+            CheckMessage::Failed(error) if manual => self.set_status(
+                fotogramma_core::tr!(
+                    "Controllo aggiornamenti non riuscito: {error}",
+                    "Update check failed: {error}"
+                ),
+                Duration::from_secs(7),
+            ),
+            _ => {}
+        }
+    }
+
+    fn show_update_dialog(&mut self, ctx: &egui::Context) {
+        let busy = self.is_busy();
+        let Some(mut dialog) = self.update.take() else {
+            return;
+        };
+        dialog.poll();
+        let mut keep = true;
+        match dialogs::show_update(ctx, &mut dialog, busy) {
+            UpdateAction::None => {}
+            UpdateAction::Install => {
+                if let Some(target) = dialog.target.clone() {
+                    dialog.cancel = Arc::new(AtomicBool::new(false));
+                    dialog.stage = UpdateStage::Downloading { done: 0, total: 0 };
+                    dialog.receiver = Some(worker::spawn_update_install(
+                        dialog.release.clone(),
+                        target,
+                        dialog.cancel.clone(),
+                        ctx.clone(),
+                    ));
+                }
+            }
+            UpdateAction::Cancel => {
+                dialog.cancel.store(true, Ordering::Relaxed);
+                dialog.receiver = None;
+                dialog.stage = UpdateStage::Available;
+            }
+            UpdateAction::Restart => {
+                if let (Some(target), UpdateStage::Ready(staged)) = (&dialog.target, &dialog.stage)
+                {
+                    match update::spawn_swap(target, staged, std::process::id(), true) {
+                        Ok(()) => {
+                            self.save(ctx);
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        Err(error) => dialog.stage = UpdateStage::Failed(error),
+                    }
+                }
+            }
+            UpdateAction::Later => {
+                if let (Some(target), UpdateStage::Ready(_)) = (&dialog.target, &dialog.stage) {
+                    update::clean_staging(target);
+                }
+                keep = false;
+            }
+            UpdateAction::Skip => {
+                self.settings.skipped_update = dialog.release.tag.clone();
+                self.settings.save();
+                keep = false;
+            }
+        }
+        if keep {
+            self.update = Some(dialog);
+        }
     }
 
     fn is_busy(&self) -> bool {
@@ -326,6 +447,8 @@ impl FotogrammaApp {
             }
         }
 
+        self.show_update_dialog(ctx);
+
         let mut close_session = false;
         if let Some(session) = self.session.as_mut() {
             match dialogs::show_progress(ctx, session) {
@@ -346,6 +469,9 @@ impl FotogrammaApp {
             let outcome = dialogs::show_settings(ctx, &mut self.settings);
             if outcome.changed {
                 self.apply_settings();
+            }
+            if outcome.check_now {
+                self.start_update_check(ctx, true);
             }
             if outcome.closed {
                 self.show_settings = false;
@@ -1067,6 +1193,7 @@ impl eframe::App for FotogrammaApp {
             .input(|input| input.viewport().inner_rect.map(|rect| rect.size()))
             .unwrap_or(self.last_size);
         self.poll_scan(&ctx);
+        self.poll_update();
         if let Some(session) = self.session.as_mut() {
             session.poll();
         }
@@ -1142,6 +1269,12 @@ fn system_locale() -> Option<String> {
         return Some("it-IT".to_string());
     }
     sys_locale::get_locale()
+}
+
+/// The update check is the app's only network request. It never runs in the
+/// automated checks, and `FOTOGRAMMA_NO_UPDATE_CHECK` switches it off.
+fn updates_allowed(args: &Args) -> bool {
+    !cfg!(test) && !args.smoke_test && std::env::var_os("FOTOGRAMMA_NO_UPDATE_CHECK").is_none()
 }
 
 fn engine_status() -> (String, bool) {
@@ -1557,5 +1690,62 @@ mod small_snapshot_tests {
         harness.get_by_label("Convert selected");
         assert!(harness.query_by_label("Impostazioni").is_none());
         assert!(harness.query_by_label("Analizza libreria").is_none());
+    }
+
+    fn release(tag: &str) -> fotogramma_core::update::Release {
+        fotogramma_core::update::Release {
+            tag: tag.to_string(),
+            version: tag.trim_start_matches('v').to_string(),
+            notes: "## What's new\n\n- Self-update.\n- A DMG installer.".to_string(),
+            page_url: "https://github.com/JohnnyTaxs/fotogramma/releases/tag/v9.9.9".to_string(),
+            package: Some(fotogramma_core::update::Package {
+                name: "Fotogramma-Darwin-arm64.zip".to_string(),
+                url: "https://github.com/JohnnyTaxs/fotogramma/releases/download/v9.9.9/x.zip"
+                    .to_string(),
+                size: 10,
+            }),
+            sums_url: None,
+        }
+    }
+
+    fn offer(app: &mut FotogrammaApp, tag: &str, manual: bool) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender
+            .send(CheckMessage::Available(Box::new(release(tag))))
+            .unwrap();
+        app.update_check = Some(receiver);
+        app.update_manual = manual;
+        app.poll_update();
+    }
+
+    #[test]
+    fn a_newer_release_opens_the_update_dialog() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let app = harness.state_mut();
+        offer(app, "v9.9.9", false);
+        assert!(app.update.is_some());
+        assert!(
+            !app.update.as_ref().unwrap().can_install(),
+            "no checksums, no automatic install"
+        );
+    }
+
+    #[test]
+    fn a_skipped_release_stays_hidden_unless_checked_by_hand() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let app = harness.state_mut();
+        app.settings.skipped_update = "v9.9.9".to_string();
+        offer(app, "v9.9.9", false);
+        assert!(app.update.is_none());
+        offer(app, "v9.9.9", true);
+        assert!(app.update.is_some());
     }
 }

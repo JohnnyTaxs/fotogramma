@@ -19,6 +19,7 @@ It is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no brows
 - Statistics, filters, search, sortable columns, and multi-file selection.
 - **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
 - Full-output validation before replacing an original file.
+- **Self-update:** the app checks GitHub at startup, shows the release notes, and installs the new version after verifying its checksum. It can be switched off.
 - **English and Italian**, chosen automatically from the system language, with an optional manual override.
 - **Settings** window: choose which codecs count as already compatible (the home page, statistics, and table update at once, no new scan) and the conversion defaults (replace original, profile, container).
 - Original application icon and Cinema Pop theme.
@@ -30,11 +31,11 @@ The portable archives are an order of magnitude smaller than the Qt/Python 1.x b
 
 | Platform | Application | ZIP |
 | --- | --- | --- |
-| macOS ARM | 22.7 MB | 10.3 MB |
+| macOS ARM | 23.6 MB | 10.9 MB (DMG 12.7 MB) |
 | Linux x86_64 | 40.3 MB | 13.3 MB |
 | Windows amd64 | 35.4 MB | 11.1 MB |
 
-The macOS build went from 106 MB and a 44 MB ZIP in 1.0.4 to 22.7 MB and 10.3 MB. The Linux and Windows bundles are larger because x265's x86 assembly is about twice the size of the arm64 build, and the C++ runtime travels inside that library instead of as a separate file.
+The macOS build went from 106 MB and a 44 MB ZIP in 1.0.4 to 23.6 MB and 10.9 MB. The Linux and Windows bundles are larger because x265's x86 assembly is about twice the size of the arm64 build, and the C++ runtime travels inside that library instead of as a separate file.
 
 The bundle contains the Rust binary, the original icon, and a purpose-built FFmpeg with only the containers, codecs, and filters the app uses. CI fails the build if the application exceeds 45 MB or the ZIP exceeds 18 MB.
 
@@ -80,11 +81,21 @@ If any check fails, the original remains unchanged. Replacement uses an atomic r
 
 The portable build includes the Rust application and its own `ffmpeg`/`ffprobe`; no installation is required on the destination computer.
 
-For macOS Apple Silicon, download `Fotogramma-Darwin-arm64.zip` from the [latest release](https://github.com/JohnnyTaxs/fotogramma/releases/latest), then extract it with Finder (double-click). The bundle is ad-hoc signed but not notarized, so Gatekeeper asks for confirmation on first launch: use **System Settings → Privacy & Security → Open Anyway** (on older macOS versions, right-click `Fotogramma.app` → **Open**).
+For macOS Apple Silicon, download `Fotogramma-Darwin-arm64.dmg` from the [latest release](https://github.com/JohnnyTaxs/fotogramma/releases/latest), open it, and drag **Fotogramma** onto the **Applications** shortcut. The bundle is ad-hoc signed but not notarized, so Gatekeeper asks for confirmation on first launch: use **System Settings → Privacy & Security → Open Anyway** (on older macOS versions, right-click `Fotogramma.app` → **Open**).
 
-Use `ditto` when extracting from a terminal; generic ZIP tools can lose permissions and app-bundle metadata. The build script creates and verifies the archive with `ditto` and `codesign`.
+The same release has `Fotogramma-Darwin-arm64.zip` (extract it with Finder, or with `ditto` from a terminal; generic ZIP tools can lose permissions and app-bundle metadata). The ZIP is what the in-app updater installs.
 
 On Windows, run `fotogramma.exe` inside the extracted folder. On Linux, run the `fotogramma` binary with `bin/` and `lib/` beside it. Each package is built on its own operating system: the release is never cross-compiled.
+
+## Updates
+
+At startup Fotogramma asks GitHub for the latest release. If it is newer, a window shows the release notes with **Update and restart**, **Later**, and **Skip this version**. The update:
+
+1. downloads the archive for your system from this repository's release;
+2. refuses it unless its SHA-256 matches `SHA256SUMS.txt`, published with every release (and, on macOS, unless the code signature is valid);
+3. after you quit, swaps the installed copy for the new one, keeps the old one if anything fails, and starts the new version.
+
+It needs write access to the folder that holds the app; otherwise the window shows the release page to download by hand. A copy started with `cargo run` is never replaced. **Settings → Updates** turns the startup check off or checks right away, and `FOTOGRAMMA_NO_UPDATE_CHECK=1` disables it for a single run. Releases up to 2.3.0 have no updater and no checksums: install 2.4.0 by hand once.
 
 ## Run from source
 
@@ -130,7 +141,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-The suite covers discovery, probing, classification, presets, FFmpeg arguments, output allocation, duration/stream/full-decode validation, atomic replacement and backup restoration, settings, the virtualized table, codec re-classification, language selection and English output, and four `egui_kittest` snapshots (main window and conversion dialog at 1280×820 and 1050×680).
+The suite covers discovery, probing, classification, presets, FFmpeg arguments, output allocation, duration/stream/full-decode validation, atomic replacement and backup restoration, settings, the virtualized table, codec re-classification, language selection and English output, update parsing, checksums, extraction and the swap helper, and four `egui_kittest` snapshots (main window and conversion dialog at 1280×820 and 1050×680).
 
 Two optional end-to-end tests convert a generated clip and verify atomic replacement with real FFmpeg binaries. They use the system tools by default, or the packaged minimal tools when `FOTOGRAMMA_FFMPEG_DIR` is set:
 
@@ -167,6 +178,7 @@ crates/core/               UI-free engine
   src/media_tools.rs       ffmpeg/ffprobe resolution and DYLD environment
   src/conversion.rs        Presets, FFmpeg arguments, safe output allocation
   src/verification.rs      Full validation and atomic backup replacement
+  src/update.rs            Release check, verified download, swap helper (only network use)
   src/formatting.rs        Italian number and size formatting
 crates/app/                egui/eframe application
   src/app.rs               Window, layout, scan flow, snapshots
@@ -179,6 +191,7 @@ crates/app/                egui/eframe application
   src/platform.rs          Open folder in the system file manager
 deployment/
   ffmpeg/                  Minimal FFmpeg build and vendor collectors
+  dmg/                     macOS disk image background and its generator
   build_rust.py            Packaging, ZIP, signature round-trip, size budget
   create_release.py        GitHub release uploader
   Fotogramma.icns/.ico/.png
@@ -196,7 +209,7 @@ static/fonts/              Embedded fonts and their licenses
 
 ## Privacy and license
 
-The app opens no server, no browser, and sends no data online. Scaling and conversion run locally with the bundled FFmpeg.
+The app opens no server and no browser, and your videos and library are never uploaded. The only network request is the update check: one HTTPS request to `api.github.com` at startup (it reveals your IP address and the app version, like any download), which you can turn off in Settings. Scanning and conversion run locally with the bundled FFmpeg.
 
 Fotogramma itself is released under the **MIT License**. See [`LICENSE`](LICENSE) for the full text, including the warranty disclaimer.
 
