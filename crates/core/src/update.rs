@@ -487,23 +487,36 @@ const SWAP_SCRIPT: &str = r#"@echo off
 rem %1 pid to wait for, %2 installed copy, %3 new copy, %4 staging folder,
 rem %5 "1" to start the new version afterwards.
 :wait
-tasklist /FI "PID eq %1" 2>nul | find "%1" >nul
+tasklist /NH /FO CSV /FI "PID eq %1" 2>nul | find """%1""" >nul
 if not errorlevel 1 (
   ping -n 2 127.0.0.1 >nul
   goto wait
 )
 set "OLD=%~2.fotogramma-old"
+set /a TRIES=0
 if exist "%OLD%" rmdir /s /q "%OLD%"
-move "%~2" "%OLD%" >nul
-if errorlevel 1 goto done
-move "%~3" "%~2" >nul
+:retry
+move "%~2" "%OLD%" >nul 2>nul
+if not errorlevel 1 goto moved
+set /a TRIES+=1
+if %TRIES% geq 20 goto failed
+rem An antivirus or the indexer may hold the folder for a moment.
+ping -n 2 127.0.0.1 >nul
+goto retry
+:moved
+move "%~3" "%~2" >nul 2>nul
 if errorlevel 1 (
-  move "%OLD%" "%~2" >nul
+  move "%OLD%" "%~2" >nul 2>nul
 ) else (
   rmdir /s /q "%OLD%"
 )
-:done
 rmdir /s /q "%~4"
+goto start
+:failed
+rem The installed copy could not be moved: leave it as it is and keep the
+rem downloaded one so the update can be done by hand.
+echo The update could not replace "%~2". The new version is in "%~3".>"%TEMP%\fotogramma-update.log"
+:start
 if "%~5"=="1" start "" "%~2\fotogramma.exe"
 "#;
 
@@ -530,6 +543,7 @@ pub fn spawn_swap(
         let mut command = Command::new("/bin/sh");
         command.arg(&script);
         command.process_group(0);
+        command.current_dir(std::env::temp_dir());
         command
     };
     #[cfg(windows)]
@@ -539,8 +553,12 @@ pub fn spawn_swap(
         fs::write(&script, SWAP_SCRIPT.replace('\n', "\r\n")).map_err(|error| error.to_string())?;
         let mut command = Command::new("cmd");
         command.arg("/C").arg(&script);
-        // DETACHED_PROCESS | CREATE_NO_WINDOW
-        command.creation_flags(0x0000_0008 | 0x0800_0000);
+        // CREATE_NO_WINDOW: a hidden console that the children share. (With
+        // DETACHED_PROCESS every tasklist and ping opened a visible one.)
+        command.creation_flags(0x0800_0000);
+        // Not the install folder, which the helper has to rename: a process
+        // working inside a folder keeps Windows from renaming it.
+        command.current_dir(std::env::temp_dir());
         command
     };
     command
