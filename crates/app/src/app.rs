@@ -105,6 +105,8 @@ pub struct FotogrammaApp {
     in_window_menu: bool,
     #[cfg(target_os = "macos")]
     native_menu: Option<crate::native_menu::NativeMenu>,
+    /// Kept to rebuild the native menu when the language changes.
+    #[cfg(target_os = "macos")]
     egui_ctx: egui::Context,
     /// A queue left over from a run that did not finish.
     resume_offer: Option<PendingQueue>,
@@ -181,6 +183,7 @@ impl FotogrammaApp {
             } else {
                 Some(crate::native_menu::NativeMenu::install(&cc.egui_ctx))
             },
+            #[cfg(target_os = "macos")]
             egui_ctx: cc.egui_ctx.clone(),
             resume_offer: crate::settings::queue_file()
                 .and_then(|file| PendingQueue::load(&file))

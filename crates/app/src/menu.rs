@@ -83,6 +83,7 @@ impl Shortcut {
     }
 
     /// The accelerator in the form `muda` reads: `CmdOrCtrl+Shift+A`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn accelerator(self) -> String {
         let key = match self.key {
             Key::Comma => ",".to_string(),
@@ -155,10 +156,12 @@ impl MenuAction {
     }
 
     /// A stable text for the native menu to hand back when an item is chosen.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn id(self) -> String {
         format!("{self:?}")
     }
 
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn from_id(id: &str) -> Option<MenuAction> {
         ALL_ACTIONS.into_iter().find(|action| action.id() == id)
     }
@@ -238,6 +241,7 @@ pub fn menus(native_app_menu: bool) -> Vec<Menu> {
 }
 
 /// The macOS application menu, between the app name and "File".
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn app_entries() -> Vec<Entry> {
     vec![
         Action(MenuAction::About),
