@@ -2170,6 +2170,55 @@ pub fn show_about(ctx: &egui::Context, logo: Option<&egui::TextureHandle>) -> bo
     closed || modal.should_close()
 }
 
+/// The first-run question. `Some(true)` to check at startup, `Some(false)` not to.
+pub fn show_update_prompt(ctx: &egui::Context) -> Option<bool> {
+    let mut choice = None;
+    egui::Modal::new(egui::Id::unique("update-prompt"))
+        .frame(modal_frame())
+        .show(ctx, |ui| {
+            ui.set_min_width(460.0);
+            ui.set_max_width(520.0);
+            ui.label(
+                RichText::new(tr_str("Aggiornamenti automatici?", "Automatic updates?"))
+                    .size(21.0)
+                    .strong(),
+            );
+            ui.add_space(4.0);
+            ui.label(tr_str(
+                "Fotogramma può controllare all’avvio se è uscita una versione nuova e proporti di installarla.",
+                "Fotogramma can check at startup whether a new version is out and offer to install it.",
+            ));
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(tr_str(
+                    "È l’unica richiesta di rete dell’app: va a GitHub e non invia nulla sulla tua libreria. Finché non rispondi sì, non parte nessuna richiesta. Puoi cambiare idea in Impostazioni.",
+                    "It is the app’s only network request: it goes to GitHub and sends nothing about your library. Until you say yes, no request is made. You can change your mind in Settings.",
+                ))
+                .small()
+                .color(theme::MUTED),
+            );
+            ui.add_space(10.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(theme::primary_button(tr_str(
+                        "Sì, controlla all’avvio",
+                        "Yes, check at startup",
+                    )))
+                    .clicked()
+                {
+                    choice = Some(true);
+                }
+                if ui
+                    .add(theme::secondary_button(tr_str("No, grazie", "No, thanks")))
+                    .clicked()
+                {
+                    choice = Some(false);
+                }
+            });
+        });
+    choice
+}
+
 /// "Interrupted conversions: resume?" shown at startup.
 pub enum ResumeChoice {
     Resume,

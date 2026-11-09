@@ -42,7 +42,7 @@ It is a small native desktop app, not a service: no server, no database, no acco
 - **Command line:** `fotogramma-cli scan <folder>` lists what is left to convert, with no window.
 - **Space saved:** each converted file shows its new size against the old one, and the end of a conversion reports the total space freed (or used, if a file grew).
 - **Content type:** anime or live action (films and series). Anime gets `-tune animation`; "Automatic" reads the folders of the path (`Anime`, `Film`, `Serie TV`, `Movies`…), in English and Italian.
-- **Self-update:** the app checks GitHub at startup, shows the release notes, and installs the new version after verifying its checksum. It can be switched off.
+- **Self-update:** the first time you start the app it asks whether it may check GitHub for updates at startup; nothing is requested until you say yes. If it finds a newer version it shows the release notes and installs it after verifying its checksum.
 - **English and Italian**, chosen automatically from the system language, with an optional manual override.
 - **Settings** window: choose which codecs count as already compatible (the home page, statistics, and table update at once, no new scan) and the conversion defaults (replace original, profile, container).
 - Original application icon and Cinema Pop theme.
@@ -165,7 +165,7 @@ fotogramma-cli scan /path/to/library --codecs hevc,av1,h264 --fail-if-convert
 
 ## Updates
 
-At startup Fotogramma asks GitHub for the latest release. If it is newer, a window shows the release notes with **Update and restart**, **Later**, and **Skip this version**. The update:
+If you agreed to it at the first start (or in Settings), Fotogramma asks GitHub for the latest release at startup. If it is newer, a window shows the release notes with **Update and restart**, **Later**, and **Skip this version**. The update:
 
 1. downloads the archive for your system from this repository's release;
 2. refuses it unless its SHA-256 matches `SHA256SUMS.txt`, published with every release (and, on macOS, unless the code signature is valid);

@@ -50,9 +50,13 @@ pub struct Settings {
     /// Interface language: `auto` (follow the system), `it` or `en`.
     #[serde(default = "default_language")]
     pub language: String,
-    /// Ask GitHub for a newer release at startup.
-    #[serde(default = "default_true")]
+    /// Ask GitHub for a newer release at startup. Off until the user agrees
+    /// to it in the first-run question or in Settings.
+    #[serde(default)]
     pub check_updates: bool,
+    /// The first-run question about updates was answered.
+    #[serde(default)]
+    pub update_choice_made: bool,
     /// Release tag the user chose to skip.
     #[serde(default)]
     pub skipped_update: String,
@@ -108,7 +112,8 @@ impl Default for Settings {
             window_width: None,
             window_height: None,
             language: default_language(),
-            check_updates: true,
+            check_updates: false,
+            update_choice_made: false,
             presets: Vec::new(),
             scan_cache: true,
             prevent_sleep: true,
@@ -182,6 +187,7 @@ mod tests {
             window_height: Some(820.0),
             language: "en".to_string(),
             check_updates: false,
+            update_choice_made: true,
             presets: vec![SavedPreset {
                 name: "Anime 1080p".to_string(),
                 crf: 20,
@@ -235,7 +241,11 @@ mod tests {
         assert_eq!(parsed.content_type, "auto");
         assert!(parsed.output_dir.is_empty());
         assert_eq!(parsed.language, "auto");
-        assert!(parsed.check_updates);
+        assert!(
+            !parsed.check_updates,
+            "no network request until the user agrees"
+        );
+        assert!(!parsed.update_choice_made);
         assert!(parsed.prevent_sleep);
         assert!(parsed.scan_cache);
         assert!(parsed.presets.is_empty());

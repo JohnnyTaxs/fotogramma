@@ -101,6 +101,8 @@ pub struct FotogrammaApp {
     panel_bottom: f32,
     show_settings: bool,
     show_about: bool,
+    /// The first-run question: check for updates at startup?
+    show_update_prompt: bool,
     /// Move the keyboard focus to the search field at the next frame.
     focus_search: bool,
     /// The menu bar drawn at the top of the window (Windows and Linux).
@@ -178,6 +180,7 @@ impl FotogrammaApp {
             panel_bottom: 0.0,
             show_settings: false,
             show_about: false,
+            show_update_prompt: false,
             focus_search: false,
             in_window_menu: !cfg!(target_os = "macos") && !cfg!(test),
             #[cfg(target_os = "macos")]
@@ -209,6 +212,12 @@ impl FotogrammaApp {
         }
         if app.settings.check_updates && updates_allowed(&app.args) {
             app.start_update_check(&cc.egui_ctx, false);
+        } else if !app.settings.check_updates
+            && !app.settings.update_choice_made
+            && updates_allowed(&app.args)
+        {
+            // Nothing goes over the network until the user says yes.
+            app.show_update_prompt = true;
         }
         if app.args.scan_on_start {
             app.start_scan(&cc.egui_ctx);
@@ -429,6 +438,7 @@ impl FotogrammaApp {
             || self.session.is_some()
             || self.show_settings
             || self.show_about
+            || self.show_update_prompt
             || self.details.is_some()
             || self.update.is_some()
             || self.close_confirm
@@ -622,6 +632,19 @@ impl FotogrammaApp {
         }
 
         self.show_update_dialog(ctx);
+
+        // The only question at first start; the queue offer comes after it.
+        if self.show_update_prompt && self.resume_offer.is_none() {
+            if let Some(allow) = dialogs::show_update_prompt(ctx) {
+                self.show_update_prompt = false;
+                self.settings.update_choice_made = true;
+                self.settings.check_updates = allow;
+                self.settings.save();
+                if allow {
+                    self.start_update_check(ctx, false);
+                }
+            }
+        }
 
         // A queue that did not finish last time.
         if let Some(count) = self.resume_offer.as_ref().map(|queue| queue.videos.len()) {
@@ -2560,5 +2583,56 @@ mod small_snapshot_tests {
             .build_eframe(demo_app);
         harness.run();
         harness.snapshot("main-window-tiny");
+    }
+
+    #[test]
+    fn the_first_run_asks_before_any_update_check() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.settings.check_updates = false;
+                app.settings.update_choice_made = false;
+                app.show_update_prompt = true;
+                app
+            });
+        harness.run();
+        harness.get_by_label("Aggiornamenti automatici?");
+        harness.get_by_label_contains("Finché non rispondi sì");
+        assert!(
+            harness.state().update_check.is_none(),
+            "no request before the answer"
+        );
+        assert!(
+            !harness.state().menu_state().idle,
+            "the menu waits for the answer"
+        );
+        harness.get_by_label("No, grazie").click();
+        harness.run();
+        let app = harness.state();
+        assert!(!app.show_update_prompt);
+        assert!(app.settings.update_choice_made);
+        assert!(!app.settings.check_updates);
+        assert!(app.update_check.is_none(), "still no request after No");
+    }
+
+    #[test]
+    fn the_menu_bar_hover_is_quiet() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.in_window_menu = true;
+                app
+            });
+        harness.run();
+        harness.get_by_label("Modifica").hover();
+        harness.run();
+        harness.step();
+        harness.snapshot("menu-bar-hover");
     }
 }

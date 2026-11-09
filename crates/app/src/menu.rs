@@ -298,6 +298,23 @@ impl MenuState {
 /// The in-window menu bar (Windows and Linux). Returns what was chosen.
 pub fn show_bar(ui: &mut egui::Ui, state: &MenuState) -> Option<MenuAction> {
     let mut chosen = None;
+    // A quiet hover: a faint light patch, no border, no bulge.
+    {
+        let style = ui.style_mut();
+        style.spacing.button_padding = egui::vec2(9.0, 3.0);
+        let patch = egui::Color32::from_white_alpha(16);
+        for widget in [
+            &mut style.visuals.widgets.hovered,
+            &mut style.visuals.widgets.active,
+            &mut style.visuals.widgets.open,
+        ] {
+            widget.weak_bg_fill = patch;
+            widget.bg_fill = patch;
+            widget.bg_stroke = egui::Stroke::NONE;
+            widget.expansion = 0.0;
+            widget.corner_radius = egui::CornerRadius::same(4);
+        }
+    }
     egui::MenuBar::new().ui(ui, |ui| {
         for menu in menus(false) {
             ui.menu_button(menu.title, |ui| {
