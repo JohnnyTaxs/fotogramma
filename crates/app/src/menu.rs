@@ -270,12 +270,15 @@ pub struct MenuState {
     pub can_export: bool,
     /// Videos to convert are selected.
     pub can_convert: bool,
+    /// A conversion is running (in a window or in the background): a scan or
+    /// another folder would pull the library from under it.
+    pub converting: bool,
 }
 
 impl MenuState {
     pub fn enabled(&self, action: MenuAction) -> bool {
         match action {
-            MenuAction::ChooseFolder | MenuAction::Scan => self.idle,
+            MenuAction::ChooseFolder | MenuAction::Scan => self.idle && !self.converting,
             MenuAction::Export => self.idle && self.can_export,
             MenuAction::ConvertSelected => self.idle && self.can_convert,
             MenuAction::SelectAll
@@ -505,6 +508,23 @@ mod tests {
     }
 
     #[test]
+    fn a_running_conversion_keeps_the_scan_off_but_not_the_queue() {
+        let state = MenuState {
+            idle: true,
+            results: true,
+            can_export: true,
+            can_convert: true,
+            converting: true,
+        };
+        assert!(!state.enabled(MenuAction::Scan));
+        assert!(!state.enabled(MenuAction::ChooseFolder));
+        assert!(
+            state.enabled(MenuAction::ConvertSelected),
+            "more can be queued"
+        );
+    }
+
+    #[test]
     fn entries_are_enabled_only_when_they_can_work() {
         let busy = MenuState::default();
         assert!(!busy.enabled(MenuAction::Scan));
@@ -527,6 +547,7 @@ mod tests {
         assert!(!welcome.enabled(MenuAction::Export));
 
         let results = MenuState {
+            converting: false,
             idle: true,
             results: true,
             can_export: true,

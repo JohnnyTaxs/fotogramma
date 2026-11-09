@@ -81,7 +81,7 @@ Data flow: directory → `discover_videos` → `probe_videos` → `mpsc` → app
 - Cancellation kills the `ffprobe` child; conversion kills the `ffmpeg` child and reports `cancelled`.
 - In the close path, ask for confirmation if a job is active and wait for it before exiting.
 - Conversion merges `stderr` into `stdout`, reads `-progress pipe:1`, and closes the pipe after `wait()`.
-- Do not run parallel conversions: the sequential queue avoids CPU and disk saturation.
+- Do not run parallel conversions: the sequential queue avoids CPU and disk saturation. The progress window can be minimized to a bar (`session_minimized`); batches added meanwhile wait in `FotogrammaApp::waiting` and start one after the other (`advance_queue`), Stop drops them, and only the running batch is in `queue.json`. A video in a running or waiting batch cannot be chosen again (`is_queued`), and a scan or a new folder stays off while a conversion runs.
 - Replacement must always use `allocate_partial_path`, `validate_conversion_output`, and `replace_verified_output`. Never rename the original before these steps and never delete the backup before the final check. WebM replacement is unsupported.
 
 ## Table contract

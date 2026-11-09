@@ -101,6 +101,10 @@ pub struct FotogrammaApp {
     panel_bottom: f32,
     show_settings: bool,
     show_about: bool,
+    /// The conversion runs in the background: a bar instead of a window.
+    session_minimized: bool,
+    /// Batches added while one runs; they start one after the other.
+    waiting: Vec<ConversionPlan>,
     /// The first-run question: check for updates at startup?
     show_update_prompt: bool,
     /// Move the keyboard focus to the search field at the next frame.
@@ -180,6 +184,8 @@ impl FotogrammaApp {
             panel_bottom: 0.0,
             show_settings: false,
             show_about: false,
+            session_minimized: false,
+            waiting: Vec::new(),
             show_update_prompt: false,
             focus_search: false,
             in_window_menu: !cfg!(target_os = "macos") && !cfg!(test),
@@ -435,7 +441,7 @@ impl FotogrammaApp {
     /// anything underneath it.
     fn modal_open(&self) -> bool {
         self.conversion_dialog.is_some()
-            || self.session.is_some()
+            || (self.session.is_some() && !self.session_minimized)
             || self.show_settings
             || self.show_about
             || self.show_update_prompt
@@ -452,6 +458,7 @@ impl FotogrammaApp {
             results: self.page == Page::Results,
             can_export: self.conversion_progress().0 > 0,
             can_convert: !self.selected_videos().is_empty(),
+            converting: self.is_busy(),
         }
     }
 
@@ -467,9 +474,7 @@ impl FotogrammaApp {
             MenuAction::Export => self.export_videos(),
             MenuAction::ConvertSelected => {
                 let selected = self.selected_videos();
-                if !selected.is_empty() {
-                    self.conversion_dialog = Some(ConversionDialog::new(selected, &self.settings));
-                }
+                self.open_conversion_dialog(selected);
             }
             MenuAction::SelectAll => {
                 let visible =
@@ -570,11 +575,34 @@ impl FotogrammaApp {
             .collect()
     }
 
+    /// Open the conversion window; while one conversion runs, what is chosen
+    /// waits behind it.
+    fn open_conversion_dialog(&mut self, videos: Vec<VideoInfo>) {
+        if videos.is_empty() {
+            return;
+        }
+        let mut dialog = ConversionDialog::new(videos, &self.settings);
+        dialog.adds_to_queue = self.session.is_some();
+        self.conversion_dialog = Some(dialog);
+    }
+
+    /// Whether a video is already in the running batch or in a waiting one.
+    fn is_queued(&self, path: &PathBuf) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.sources.contains(path))
+            || self
+                .waiting
+                .iter()
+                .any(|plan| plan.videos.iter().any(|video| &video.path == path))
+    }
+
     fn selected_videos(&self) -> Vec<VideoInfo> {
         self.videos
             .iter()
             .filter(|video| video.category == fotogramma_core::scanner::Category::Convert)
             .filter(|video| self.selected.contains(&video.path))
+            .filter(|video| !self.is_queued(&video.path))
             .cloned()
             .collect()
     }
@@ -622,7 +650,23 @@ impl FotogrammaApp {
             match outcome {
                 DialogOutcome::Start(plan) => {
                     self.conversion_dialog = None;
-                    self.start_conversion(*plan, ctx);
+                    if self.session.is_some() {
+                        for video in &plan.videos {
+                            self.selected.remove(&video.path);
+                        }
+                        self.set_status(
+                            fotogramma_core::tr!(
+                                "Aggiunti alla coda: {} video",
+                                "Added to the queue: {} videos",
+                                format_int(plan.videos.len())
+                            ),
+                            Duration::from_secs(6),
+                        );
+                        self.waiting.push(*plan);
+                    } else {
+                        self.session_minimized = false;
+                        self.start_conversion(*plan, ctx);
+                    }
                 }
                 DialogOutcome::Cancel => {
                     self.conversion_dialog = None;
@@ -678,10 +722,11 @@ impl FotogrammaApp {
         }
 
         // The queue ended: sleep or shut down after a countdown that can be cancelled.
+        let queue_empty = self.waiting.is_empty();
         let ended = self
             .session
             .as_mut()
-            .filter(|session| session.finished && !session.after_handled)
+            .filter(|session| session.finished && !session.after_handled && queue_empty)
             .map(|session| {
                 session.after_handled = true;
                 let stopped = session.failed || session.cancel.load(Ordering::Relaxed);
@@ -711,9 +756,12 @@ impl FotogrammaApp {
         }
 
         let mut close_session = false;
-        if let Some(session) = self.session.as_mut() {
-            match dialogs::show_progress(ctx, session) {
+        let waiting = self.waiting.len();
+        let minimized = self.session_minimized;
+        if let Some(session) = self.session.as_mut().filter(|_| !minimized) {
+            match dialogs::show_progress(ctx, session, waiting) {
                 ProgressAction::Close => close_session = true,
+                ProgressAction::Minimize => self.session_minimized = true,
                 ProgressAction::OpenFolder => {
                     let destination = session.destination_dir().to_path_buf();
                     platform::open_folder(&destination);
@@ -729,6 +777,7 @@ impl FotogrammaApp {
                 .and_then(|session| session.space)
                 .filter(|space| space.is_saving() && space.delta() > 0);
             self.session = None;
+            self.session_minimized = false;
             if let Some(space) = saved {
                 self.set_status(
                     fotogramma_core::tr!(
@@ -835,6 +884,24 @@ impl FotogrammaApp {
         );
         self.session = Some(ConversionSession::new(plan, receiver, cancel));
         ctx.request_repaint();
+    }
+
+    /// The batch that ran has finished: start the next waiting one, or drop the
+    /// waiting ones if the user stopped the queue.
+    fn advance_queue(&mut self, ctx: &egui::Context) {
+        let Some(session) = &self.session else {
+            return;
+        };
+        if !session.finished || self.waiting.is_empty() {
+            return;
+        }
+        if session.cancel.load(Ordering::Relaxed) {
+            self.waiting.clear();
+            return;
+        }
+        self.session = None;
+        let next = self.waiting.remove(0);
+        self.start_conversion(next, ctx);
     }
 
     /// Keep the library in step with the conversions of the session. A video
@@ -1408,8 +1475,7 @@ impl FotogrammaApp {
                     ))
                     .clicked()
                 {
-                    self.conversion_dialog =
-                        Some(ConversionDialog::new(selected.clone(), &self.settings));
+                    self.open_conversion_dialog(selected.clone());
                 }
                 // Select everything that can be converted in the current view
                 // (so the filter and the search narrow it), or clear it again.
@@ -1601,6 +1667,7 @@ impl eframe::App for FotogrammaApp {
             session.poll();
         }
         self.mark_replaced_videos();
+        self.advance_queue(&ctx);
 
         if ctx.input(|input| input.viewport().close_requested()) {
             if self.is_busy() && !self.pending_close {
@@ -1628,6 +1695,38 @@ impl eframe::App for FotogrammaApp {
                 .show(ui, |ui| {
                     menu_actions.extend(menu::show_bar(ui, &state));
                 });
+        }
+
+        if self.session.is_some() && self.session_minimized {
+            let waiting = self.waiting.len();
+            let mut bar = dialogs::BarAction::None;
+            if let Some(session) = self.session.as_ref() {
+                egui::Panel::bottom("conversion-bar")
+                    .show_separator_line(false)
+                    .frame(
+                        egui::Frame::NONE
+                            .fill(theme::BG_DEEP)
+                            .inner_margin(egui::Margin::symmetric(24, 8)),
+                    )
+                    .show(ui, |ui| {
+                        bar = dialogs::show_background_bar(ui, session, waiting);
+                    });
+            }
+            match bar {
+                dialogs::BarAction::Show => self.session_minimized = false,
+                dialogs::BarAction::Pause => {
+                    if let Some(session) = &self.session {
+                        let paused = session.pause.load(Ordering::Relaxed);
+                        session.pause.store(!paused, Ordering::Relaxed);
+                    }
+                }
+                dialogs::BarAction::Stop => {
+                    if let Some(session) = &self.session {
+                        session.cancel();
+                    }
+                }
+                dialogs::BarAction::None => {}
+            }
         }
 
         egui::Panel::bottom("status-bar")
@@ -2634,5 +2733,115 @@ mod small_snapshot_tests {
         harness.run();
         harness.step();
         harness.snapshot("menu-bar-hover");
+    }
+
+    fn running_session(
+        app: &mut FotogrammaApp,
+        videos: Vec<VideoInfo>,
+    ) -> std::sync::mpsc::Sender<crate::worker::ConversionMessage> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let plan = ConversionPlan {
+            videos,
+            profile: fotogramma_core::conversion::profile("balanced").unwrap(),
+            destination_dir: PathBuf::from("/Filmati/Fotogramma-H265"),
+            container: "mkv".to_string(),
+            replace_original: false,
+            options: crate::worker::ConversionOptions::default(),
+            after: PowerAction::Nothing,
+        };
+        app.session = Some(ConversionSession::new(
+            plan,
+            receiver,
+            Arc::new(AtomicBool::new(false)),
+        ));
+        sender
+    }
+
+    #[test]
+    fn a_minimized_conversion_leaves_the_app_usable_and_queues_more() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let ctx = harness.ctx.clone();
+        let app = harness.state_mut();
+        let both: Vec<VideoInfo> = app
+            .videos
+            .iter()
+            .filter(|video| video.category == fotogramma_core::scanner::Category::Convert)
+            .cloned()
+            .collect();
+        assert_eq!(both.len(), 2);
+        let _sender = running_session(app, vec![both[0].clone()]);
+        assert!(!app.menu_state().idle, "the progress window is a modal");
+        app.session_minimized = true;
+        assert!(app.menu_state().idle, "minimized: the menu works again");
+        assert!(
+            !app.menu_state().enabled(MenuAction::Scan),
+            "but no scan under a conversion"
+        );
+
+        // The video that is running cannot be chosen again; the other can.
+        app.selected.insert(both[0].path.clone());
+        app.selected.insert(both[1].path.clone());
+        let chosen = app.selected_videos();
+        assert_eq!(chosen.len(), 1);
+        assert_eq!(chosen[0].path, both[1].path);
+        app.handle_menu_action(MenuAction::ConvertSelected, &ctx);
+        assert!(app
+            .conversion_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.adds_to_queue));
+        harness.run();
+        let app = harness.state_mut();
+        app.conversion_dialog = None;
+        app.waiting.push(ConversionPlan {
+            videos: vec![both[1].clone()],
+            profile: fotogramma_core::conversion::profile("balanced").unwrap(),
+            destination_dir: PathBuf::from("/x"),
+            container: "mkv".to_string(),
+            replace_original: false,
+            options: crate::worker::ConversionOptions::default(),
+            after: PowerAction::Nothing,
+        });
+        if let Some(session) = app.session.as_mut() {
+            session.percent = 37;
+            session.label = "1 / 1 · Gita al lago.mp4 · 37% · circa 41 min rimasti".to_string();
+        }
+        harness.run();
+        harness.snapshot("conversion-background");
+    }
+
+    #[test]
+    fn stopping_the_running_batch_drops_the_waiting_ones() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let ctx = harness.ctx.clone();
+        let app = harness.state_mut();
+        let sender = running_session(app, Vec::new());
+        app.waiting.push(ConversionPlan {
+            videos: Vec::new(),
+            profile: fotogramma_core::conversion::profile("balanced").unwrap(),
+            destination_dir: PathBuf::from("/x"),
+            container: "mkv".to_string(),
+            replace_original: false,
+            options: crate::worker::ConversionOptions::default(),
+            after: PowerAction::Nothing,
+        });
+        app.session
+            .as_ref()
+            .unwrap()
+            .cancel
+            .store(true, Ordering::Relaxed);
+        sender
+            .send(crate::worker::ConversionMessage::Completed(Vec::new()))
+            .unwrap();
+        app.session.as_mut().unwrap().poll();
+        app.advance_queue(&ctx);
+        assert!(app.waiting.is_empty(), "Stop stops the whole queue");
     }
 }

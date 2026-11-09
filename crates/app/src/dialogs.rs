@@ -63,6 +63,8 @@ pub struct ConversionDialog {
     pub loaded_preset: Option<String>,
     /// What to do with the computer when the queue ends.
     pub after: PowerAction,
+    /// A conversion is already running: this one waits behind it.
+    pub adds_to_queue: bool,
 }
 
 pub struct ConversionPlan {
@@ -120,6 +122,7 @@ impl ConversionDialog {
             preset_name: String::new(),
             loaded_preset: None,
             after: PowerAction::Nothing,
+            adds_to_queue: false,
         };
         // A saved profile that no longer exists falls back to "balanced".
         if defaults.default_profile != "custom"
@@ -810,10 +813,11 @@ impl ConversionDialog {
                         if ui
                             .add_enabled(
                                 can_start,
-                                theme::primary_button(tr_str(
-                                    "Avvia conversione",
-                                    "Start conversion",
-                                )),
+                                theme::primary_button(if self.adds_to_queue {
+                                    tr_str("Aggiungi alla coda", "Add to the queue")
+                                } else {
+                                    tr_str("Avvia conversione", "Start conversion")
+                                }),
                             )
                             .clicked()
                         {
@@ -960,6 +964,8 @@ pub struct ConversionSession {
     /// What to do with the computer when the queue has ended.
     pub after: PowerAction,
     pub after_handled: bool,
+    /// The files of this batch, so they cannot be queued twice.
+    pub sources: std::collections::HashSet<PathBuf>,
 }
 
 /// `, 1,2 GB instead of 2,0 GB (-40%)` for one converted file.
@@ -992,7 +998,9 @@ impl ConversionSession {
         receiver: Receiver<ConversionMessage>,
         cancel: Arc<AtomicBool>,
     ) -> Self {
+        let sources = plan.videos.iter().map(|video| video.path.clone()).collect();
         Self {
+            sources,
             pause: plan.options.pause.clone(),
             after: plan.after,
             receiver,
@@ -1178,9 +1186,15 @@ pub enum ProgressAction {
     Cancel,
     Close,
     OpenFolder,
+    /// Hide the window and let the queue run in the background.
+    Minimize,
 }
 
-pub fn show_progress(ctx: &egui::Context, session: &mut ConversionSession) -> ProgressAction {
+pub fn show_progress(
+    ctx: &egui::Context,
+    session: &mut ConversionSession,
+    waiting: usize,
+) -> ProgressAction {
     let mut action = ProgressAction::None;
     let modal = egui::Modal::new(egui::Id::unique("conversion-progress"))
         .frame(modal_frame())
@@ -1195,6 +1209,17 @@ pub fn show_progress(ctx: &egui::Context, session: &mut ConversionSession) -> Pr
             };
             ui.label(RichText::new(heading).size(theme::PAGE_TITLE_SIZE).strong());
             ui.label(&session.label);
+            if waiting > 0 {
+                ui.label(
+                    RichText::new(fotogramma_core::tr!(
+                        "In coda dopo questo: {} gruppi di video",
+                        "Waiting after this one: {} batches",
+                        waiting
+                    ))
+                    .small()
+                    .color(theme::LAVENDER),
+                );
+            }
             if !session.finished && session.pause.load(std::sync::atomic::Ordering::Relaxed) {
                 ui.label(
                     RichText::new(tr_str(
@@ -1290,12 +1315,27 @@ pub fn show_progress(ctx: &egui::Context, session: &mut ConversionSession) -> Pr
                         {
                             action = ProgressAction::Close;
                         }
-                    } else if ui
-                        .add(theme::secondary_button(tr_str("Interrompi", "Stop")))
-                        .clicked()
-                    {
-                        session.cancel();
-                        action = ProgressAction::Cancel;
+                    } else {
+                        if ui
+                            .add(theme::secondary_button(tr_str("Interrompi", "Stop")))
+                            .clicked()
+                        {
+                            session.cancel();
+                            action = ProgressAction::Cancel;
+                        }
+                        if ui
+                            .add(theme::primary_button(tr_str(
+                                "Riduci in background",
+                                "Minimize to the background",
+                            )))
+                            .on_hover_text(tr_str(
+                                "La conversione continua: nel frattempo puoi aggiungere altri video alla coda",
+                                "The conversion keeps going: meanwhile you can add more videos to the queue",
+                            ))
+                            .clicked()
+                        {
+                            action = ProgressAction::Minimize;
+                        }
                     }
                 });
             });
@@ -1304,6 +1344,94 @@ pub fn show_progress(ctx: &egui::Context, session: &mut ConversionSession) -> Pr
     if modal.should_close() && session.finished {
         action = ProgressAction::Close;
     }
+    action
+}
+
+pub enum BarAction {
+    None,
+    Show,
+    Pause,
+    Stop,
+}
+
+/// The conversion in the background: one line at the bottom of the window.
+pub fn show_background_bar(
+    ui: &mut egui::Ui,
+    session: &ConversionSession,
+    waiting: usize,
+) -> BarAction {
+    let mut action = BarAction::None;
+    ui.horizontal(|ui| {
+        let (title, color) = if session.failed {
+            (
+                tr_str("Conversione non riuscita", "Conversion failed"),
+                theme::ERROR,
+            )
+        } else if session.finished {
+            (
+                tr_str("Conversione completata", "Conversion completed"),
+                theme::MINT,
+            )
+        } else if session.pause.load(std::sync::atomic::Ordering::Relaxed) {
+            (
+                tr_str("Conversione in pausa", "Conversion paused"),
+                theme::CORAL_HOVER,
+            )
+        } else {
+            (
+                tr_str("Conversione in corso", "Conversion in progress"),
+                theme::LAVENDER,
+            )
+        };
+        ui.label(RichText::new(title).small().strong().color(color));
+        ui.add(
+            egui::ProgressBar::new(f32::from(session.percent) / 100.0)
+                .desired_width(160.0)
+                .desired_height(8.0)
+                .fill(theme::CORAL),
+        );
+        ui.add(
+            egui::Label::new(RichText::new(&session.label).small().color(theme::MUTED)).truncate(),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add(theme::secondary_button(if session.finished {
+                    tr_str("Mostra risultati", "Show results")
+                } else {
+                    tr_str("Mostra", "Show")
+                }))
+                .clicked()
+            {
+                action = BarAction::Show;
+            }
+            if !session.finished {
+                if ui
+                    .add(theme::secondary_button(tr_str("Interrompi", "Stop")))
+                    .clicked()
+                {
+                    action = BarAction::Stop;
+                }
+                let paused = session.pause.load(std::sync::atomic::Ordering::Relaxed);
+                if ui
+                    .add(theme::secondary_button(if paused {
+                        tr_str("Riprendi", "Resume")
+                    } else {
+                        tr_str("Pausa", "Pause")
+                    }))
+                    .clicked()
+                {
+                    action = BarAction::Pause;
+                }
+            }
+            if waiting > 0 {
+                ui.label(
+                    RichText::new(fotogramma_core::tr!("In coda: {}", "Queued: {}", waiting))
+                        .small()
+                        .color(theme::LAVENDER),
+                );
+            }
+        });
+    });
     action
 }
 

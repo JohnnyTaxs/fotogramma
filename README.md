@@ -37,6 +37,7 @@ It is a small native desktop app, not a service: no server, no database, no acco
 - **Keeps long jobs safe:** the queue is saved while it runs and can be resumed after a crash, paused, ordered (largest or smallest first), and followed by sleep or shutdown; the computer is kept awake meanwhile.
 - **Smarter conversions:** subtitles that do not fit MP4 send the file to MKV, HDR sources are never processed in 8 bits, results that save too little are dropped, converted files keep the date of the original, and the progress shows the time left.
 - **A normal application menu:** on macOS the native menu bar (Fotogramma, File, Edit, View, Window, Help), on Windows and Linux a menu bar in the window, with the same entries and shortcuts: `Ctrl/Cmd+O` choose a folder, `R` scan, `E` export, `Enter` convert the selection, `Shift+A` select all to convert, `F` search, `1`–`4` filters, `,` settings, `W` close the window, `Q` quit. Entries are greyed out when they cannot work.
+- **Conversion in the background:** the progress window can be minimized to a bar at the bottom, and while it runs you can choose more videos and add them to the queue (they run one batch after the other, never in parallel). Stop ends the whole queue.
 - **Your own presets:** save the custom profile under a name.
 - **Japanese and Korean file names** are drawn with a system font when a scan finds them.
 - **Command line:** `fotogramma-cli scan <folder>` lists what is left to convert, with no window.
