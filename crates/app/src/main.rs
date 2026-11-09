@@ -20,7 +20,7 @@ fn main() -> eframe::Result<()> {
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_inner_size([1280.0, 820.0])
         .with_min_inner_size([1050.0, 680.0])
-        .with_title("Fotogramma — H.265 cinema library");
+        .with_title("Fotogramma");
     if let Some(icon) = icon::window_icon() {
         viewport = viewport.with_icon(icon);
     }
@@ -31,7 +31,7 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "Fotogramma — H.265 cinema library",
+        "Fotogramma",
         options,
         Box::new(|cc| Ok(Box::new(app::FotogrammaApp::new(cc)))),
     )

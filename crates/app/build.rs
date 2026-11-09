@@ -4,7 +4,7 @@ fn main() {
         let mut resource = winresource::WindowsResource::new();
         resource.set_icon("../../deployment/Fotogramma.ico");
         resource.set("ProductName", "Fotogramma");
-        resource.set("FileDescription", "Fotogramma — H.265 cinema library");
+        resource.set("FileDescription", "Fotogramma");
         resource.set("LegalCopyright", "MIT License");
         resource
             .compile()
