@@ -17,11 +17,15 @@ mod worker;
 fn main() -> eframe::Result<()> {
     icon::install();
 
+    let mut viewport = eframe::egui::ViewportBuilder::default()
+        .with_inner_size([1280.0, 820.0])
+        .with_min_inner_size([1050.0, 680.0])
+        .with_title("Fotogramma — H.265 cinema library");
+    if let Some(icon) = icon::window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 820.0])
-            .with_min_inner_size([1050.0, 680.0])
-            .with_title("Fotogramma — H.265 cinema library"),
+        viewport,
         renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
