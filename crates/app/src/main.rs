@@ -15,6 +15,13 @@ mod theme;
 mod worker;
 
 fn main() -> eframe::Result<()> {
+    // The update helper on Windows is a copy of this program (no script, no
+    // shell): it swaps the installed folder and exits without a window.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--apply-update") {
+        std::process::exit(fotogramma_core::update::run_apply_update(&args[2..]));
+    }
+    fotogramma_core::update::clean_helper();
     icon::install();
 
     let mut viewport = eframe::egui::ViewportBuilder::default()

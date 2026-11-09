@@ -482,43 +482,102 @@ if [ "$5" = "1" ]; then
 fi
 "#;
 
+/// The swap done in Rust, used on Windows (a copy of the program runs it, see
+/// `spawn_swap`) and tested everywhere. Windows will not rename a folder while
+/// a program inside it runs, so the move is retried until the old process has
+/// gone. On failure the installed copy is left as it was.
+pub fn apply_swap(
+    installed: &Path,
+    staged: &Path,
+    staging: &Path,
+    relaunch: bool,
+) -> Result<(), String> {
+    apply_swap_with(
+        installed,
+        staged,
+        staging,
+        relaunch,
+        240,
+        Duration::from_millis(250),
+    )
+}
+
+fn apply_swap_with(
+    installed: &Path,
+    staged: &Path,
+    staging: &Path,
+    relaunch: bool,
+    tries: u32,
+    delay: Duration,
+) -> Result<(), String> {
+    let mut old_name = installed.as_os_str().to_owned();
+    old_name.push(".fotogramma-old");
+    let old = PathBuf::from(old_name);
+    let _ = fs::remove_dir_all(&old);
+    let mut moved = Err(String::new());
+    for attempt in 0..tries {
+        moved = fs::rename(installed, &old).map_err(|error| error.to_string());
+        if moved.is_ok() {
+            break;
+        }
+        if attempt + 1 < tries {
+            std::thread::sleep(delay);
+        }
+    }
+    moved?;
+    match fs::rename(staged, installed) {
+        Ok(()) => {
+            let _ = fs::remove_dir_all(&old);
+        }
+        Err(error) => {
+            let _ = fs::rename(&old, installed);
+            return Err(error.to_string());
+        }
+    }
+    let _ = fs::remove_dir_all(staging);
+    if relaunch {
+        let executable = installed.join(format!("fotogramma{}", std::env::consts::EXE_SUFFIX));
+        let _ = Command::new(executable)
+            .current_dir(std::env::temp_dir())
+            .spawn();
+    }
+    Ok(())
+}
+
+/// Entry point of the helper process: `fotogramma --apply-update <pid>
+/// <installed> <new copy> <staging> <0|1>`. Returns the exit code.
+pub fn run_apply_update(args: &[String]) -> i32 {
+    let [_pid, installed, staged, staging, relaunch] = args else {
+        return 2;
+    };
+    match apply_swap(
+        Path::new(installed),
+        Path::new(staged),
+        Path::new(staging),
+        relaunch == "1",
+    ) {
+        Ok(()) => 0,
+        Err(error) => {
+            let _ = fs::write(
+                std::env::temp_dir().join("fotogramma-update.log"),
+                format!("The update could not replace {installed}: {error}\nThe new version is in {staged}.\n"),
+            );
+            1
+        }
+    }
+}
+
+/// Where the Windows helper (a copy of this program) lives while it works.
 #[cfg(windows)]
-const SWAP_SCRIPT: &str = r#"@echo off
-rem %1 pid to wait for, %2 installed copy, %3 new copy, %4 staging folder,
-rem %5 "1" to start the new version afterwards.
-:wait
-tasklist /NH /FO CSV /FI "PID eq %1" 2>nul | find """%1""" >nul
-if not errorlevel 1 (
-  ping -n 2 127.0.0.1 >nul
-  goto wait
-)
-set "OLD=%~2.fotogramma-old"
-set /a TRIES=0
-if exist "%OLD%" rmdir /s /q "%OLD%"
-:retry
-move "%~2" "%OLD%" >nul 2>nul
-if not errorlevel 1 goto moved
-set /a TRIES+=1
-if %TRIES% geq 20 goto failed
-rem An antivirus or the indexer may hold the folder for a moment.
-ping -n 2 127.0.0.1 >nul
-goto retry
-:moved
-move "%~3" "%~2" >nul 2>nul
-if errorlevel 1 (
-  move "%OLD%" "%~2" >nul 2>nul
-) else (
-  rmdir /s /q "%OLD%"
-)
-rmdir /s /q "%~4"
-goto start
-:failed
-rem The installed copy could not be moved: leave it as it is and keep the
-rem downloaded one so the update can be done by hand.
-echo The update could not replace "%~2". The new version is in "%~3".>"%TEMP%\fotogramma-update.log"
-:start
-if "%~5"=="1" start "" "%~2\fotogramma.exe"
-"#;
+fn helper_path() -> PathBuf {
+    std::env::temp_dir().join("fotogramma-update.exe")
+}
+
+/// Remove the helper left by an earlier update. Call it at startup.
+pub fn clean_helper() {
+    #[cfg(windows)]
+    let _ = fs::remove_file(helper_path());
+}
 
 /// Start the helper that swaps the installed copy for `staged` after this
 /// process (`pid`) has exited. The caller must quit right afterwards.
@@ -549,15 +608,18 @@ pub fn spawn_swap(
     #[cfg(windows)]
     let mut command = {
         use std::os::windows::process::CommandExt;
-        let script = std::env::temp_dir().join("fotogramma-swap.cmd");
-        fs::write(&script, SWAP_SCRIPT.replace('\n', "\r\n")).map_err(|error| error.to_string())?;
-        let mut command = Command::new("cmd");
-        command.arg("/C").arg(&script);
-        // CREATE_NO_WINDOW: a hidden console that the children share. (With
-        // DETACHED_PROCESS every tasklist and ping opened a visible one.)
+        // No script and no shell: a copy of this program, run from the temp
+        // folder (the install folder cannot be renamed while it runs).
+        let helper = helper_path();
+        fs::copy(
+            std::env::current_exe().map_err(|error| error.to_string())?,
+            &helper,
+        )
+        .map_err(|error| error.to_string())?;
+        let mut command = Command::new(helper);
+        command.arg("--apply-update");
+        // CREATE_NO_WINDOW
         command.creation_flags(0x0800_0000);
-        // Not the install folder, which the helper has to rename: a process
-        // working inside a folder keeps Windows from renaming it.
         command.current_dir(std::env::temp_dir());
         command
     };
@@ -773,6 +835,70 @@ mod tests {
         assert!(!directory.join("Fotogramma.fotogramma-old").exists());
         assert!(!staging.exists());
         let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn apply_swap_replaces_the_copy_and_cleans_up() {
+        let directory = scratch("apply");
+        let installed = directory.join("Fotogramma");
+        let staging = directory.join(".fotogramma-update");
+        let staged = staging.join("Fotogramma");
+        fs::create_dir_all(&installed).unwrap();
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(installed.join("version"), "old").unwrap();
+        fs::write(staged.join("version"), "new").unwrap();
+        apply_swap_with(&installed, &staged, &staging, false, 2, Duration::ZERO).unwrap();
+        assert_eq!(
+            fs::read_to_string(installed.join("version")).unwrap(),
+            "new"
+        );
+        assert!(!directory.join("Fotogramma.fotogramma-old").exists());
+        assert!(!staging.exists());
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn apply_swap_undoes_the_first_move_when_the_second_fails() {
+        let directory = scratch("apply-fail");
+        let installed = directory.join("Fotogramma");
+        fs::create_dir_all(&installed).unwrap();
+        fs::write(installed.join("version"), "old").unwrap();
+        let staging = directory.join(".fotogramma-update");
+        fs::create_dir_all(&staging).unwrap();
+        let result = apply_swap_with(
+            &installed,
+            &staging.join("Missing"),
+            &staging,
+            false,
+            2,
+            Duration::ZERO,
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read_to_string(installed.join("version")).unwrap(),
+            "old"
+        );
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn apply_swap_gives_up_when_the_folder_cannot_be_moved() {
+        let directory = scratch("apply-none");
+        let result = apply_swap_with(
+            &directory.join("Absent"),
+            &directory.join("New"),
+            &directory.join("staging"),
+            false,
+            2,
+            Duration::ZERO,
+        );
+        assert!(result.is_err());
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn the_helper_arguments_are_checked() {
+        assert_eq!(run_apply_update(&["1".to_string()]), 2);
     }
 
     #[cfg(unix)]
