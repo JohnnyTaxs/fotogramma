@@ -5,6 +5,9 @@ mod app;
 mod dialogs;
 mod icon;
 mod markdown;
+mod menu;
+#[cfg(target_os = "macos")]
+mod native_menu;
 mod platform;
 mod settings;
 mod table;

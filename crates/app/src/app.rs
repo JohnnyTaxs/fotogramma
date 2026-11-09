@@ -21,6 +21,7 @@ use crate::dialogs::{
     self, CloseChoice, ConversionDialog, ConversionPlan, ConversionSession, DialogOutcome,
     ProgressAction, UpdateAction, UpdateDialog, UpdateStage,
 };
+use crate::menu::{self, MenuAction, MenuState};
 use crate::platform::{self, PowerAction};
 use crate::settings::{Settings, KNOWN_CODECS};
 use crate::table::{self, FilterCategory, SortState, TableAction};
@@ -97,6 +98,14 @@ pub struct FotogrammaApp {
     started_at: Instant,
     last_size: Vec2,
     show_settings: bool,
+    show_about: bool,
+    /// Move the keyboard focus to the search field at the next frame.
+    focus_search: bool,
+    /// The menu bar drawn at the top of the window (Windows and Linux).
+    in_window_menu: bool,
+    #[cfg(target_os = "macos")]
+    native_menu: Option<crate::native_menu::NativeMenu>,
+    egui_ctx: egui::Context,
     /// A queue left over from a run that did not finish.
     resume_offer: Option<PendingQueue>,
     /// Sleep or shut down when this instant arrives, unless cancelled.
@@ -163,6 +172,16 @@ impl FotogrammaApp {
             started_at: Instant::now(),
             last_size: Vec2::new(1280.0, 820.0),
             show_settings: false,
+            show_about: false,
+            focus_search: false,
+            in_window_menu: !cfg!(target_os = "macos") && !cfg!(test),
+            #[cfg(target_os = "macos")]
+            native_menu: if cfg!(test) {
+                None
+            } else {
+                Some(crate::native_menu::NativeMenu::install(&cc.egui_ctx))
+            },
+            egui_ctx: cc.egui_ctx.clone(),
             resume_offer: crate::settings::queue_file()
                 .and_then(|file| PendingQueue::load(&file))
                 .map(PendingQueue::still_present)
@@ -373,6 +392,95 @@ impl FotogrammaApp {
                 }
             }
         }
+    }
+
+    /// Ask for a folder and put it in the library field.
+    fn browse_folder(&mut self) {
+        if let Some(selected) = rfd::FileDialog::new()
+            .set_directory(if self.directory.trim().is_empty() {
+                home_directory()
+            } else {
+                PathBuf::from(self.directory.trim())
+            })
+            .pick_folder()
+        {
+            self.directory = selected.to_string_lossy().into_owned();
+            self.folder_error = None;
+        }
+    }
+
+    /// Select every video that can be converted among the rows of the view.
+    fn select_all_convertible(&mut self, visible: &[usize]) {
+        let convertible = self.convertible_in(visible);
+        self.selected.extend(convertible);
+        self.selection_anchor = None;
+    }
+
+    /// A window that asks for an answer is open: the menu must not start
+    /// anything underneath it.
+    fn modal_open(&self) -> bool {
+        self.conversion_dialog.is_some()
+            || self.session.is_some()
+            || self.show_settings
+            || self.show_about
+            || self.details.is_some()
+            || self.update.is_some()
+            || self.close_confirm
+            || self.resume_offer.is_some()
+            || self.power_countdown.is_some()
+    }
+
+    fn menu_state(&self) -> MenuState {
+        MenuState {
+            idle: !self.scanning && !self.modal_open(),
+            results: self.page == Page::Results,
+            can_export: self.conversion_progress().0 > 0,
+            can_convert: !self.selected_videos().is_empty(),
+        }
+    }
+
+    /// Carry out what the menu (or its shortcut) asked for.
+    fn handle_menu_action(&mut self, action: MenuAction, ctx: &egui::Context) {
+        let state = self.menu_state();
+        if !state.enabled(action) {
+            return;
+        }
+        match action {
+            MenuAction::ChooseFolder => self.browse_folder(),
+            MenuAction::Scan => self.start_scan(ctx),
+            MenuAction::Export => self.export_videos(),
+            MenuAction::ConvertSelected => {
+                let selected = self.selected_videos();
+                if !selected.is_empty() {
+                    self.conversion_dialog = Some(ConversionDialog::new(selected, &self.settings));
+                }
+            }
+            MenuAction::SelectAll => {
+                let visible =
+                    table::visible_indices(&self.videos, self.filter, &self.query, self.sort);
+                self.select_all_convertible(&visible);
+            }
+            MenuAction::ClearSelection => {
+                self.selected.clear();
+                self.selection_anchor = None;
+            }
+            MenuAction::FocusSearch => self.focus_search = true,
+            MenuAction::FilterAll => self.filter = FilterCategory::All,
+            MenuAction::FilterConvert => self.filter = FilterCategory::Convert,
+            MenuAction::FilterCompatible => self.filter = FilterCategory::Compatible,
+            MenuAction::FilterErrors => self.filter = FilterCategory::Error,
+            MenuAction::Settings => self.show_settings = true,
+            MenuAction::CheckUpdates => self.start_update_check(ctx, true),
+            MenuAction::About => self.show_about = true,
+            MenuAction::Minimize => ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
+            MenuAction::ToggleMaximize => {
+                let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+            }
+            // Goes through the same close handling, which asks first when a job runs.
+            MenuAction::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+        }
+        ctx.request_repaint();
     }
 
     fn start_scan(&mut self, ctx: &egui::Context) {
@@ -664,6 +772,10 @@ impl FotogrammaApp {
         if language != before {
             // The engine label is built once: rebuild it in the new language.
             (self.engine_status, self.engine_ok) = engine_status();
+            #[cfg(target_os = "macos")]
+            if self.native_menu.is_some() {
+                self.native_menu = Some(crate::native_menu::NativeMenu::install(&self.egui_ctx));
+            }
         }
         reclassify(&mut self.videos, &self.settings.accepted_codecs);
         self.summary = summarize(&self.videos, None);
@@ -851,17 +963,7 @@ impl FotogrammaApp {
                 self.start_scan(ctx);
             }
             if browse {
-                if let Some(selected) = rfd::FileDialog::new()
-                    .set_directory(if self.directory.trim().is_empty() {
-                        home_directory()
-                    } else {
-                        PathBuf::from(self.directory.trim())
-                    })
-                    .pick_folder()
-                {
-                    self.directory = selected.to_string_lossy().into_owned();
-                    self.folder_error = None;
-                }
+                self.browse_folder();
             }
 
             if self.scanning {
@@ -1232,11 +1334,14 @@ impl FotogrammaApp {
                 }
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.add_sized(
+                let search = ui.add_sized(
                     [340.0, 34.0],
                     egui::TextEdit::singleline(&mut self.query)
                         .hint_text(tr_str("Cerca nella libreria…", "Search the library…")),
                 );
+                if std::mem::take(&mut self.focus_search) {
+                    search.request_focus();
+                }
             });
         });
 
@@ -1303,8 +1408,7 @@ impl FotogrammaApp {
                     ))
                     .clicked()
                 {
-                    self.selected.extend(convertible.iter().cloned());
-                    self.selection_anchor = None;
+                    self.select_all_convertible(&visible);
                 }
             });
         });
@@ -1447,6 +1551,18 @@ impl eframe::App for FotogrammaApp {
             .unwrap_or(self.last_size);
         self.poll_scan(&ctx);
         self.poll_update();
+        let mut menu_actions: Vec<MenuAction> = Vec::new();
+        #[cfg(target_os = "macos")]
+        if self.native_menu.is_some() {
+            let state = self.menu_state();
+            if let Some(native) = self.native_menu.as_mut() {
+                native.update(&state);
+            }
+            menu_actions.extend(crate::native_menu::NativeMenu::take_actions());
+        }
+        if !cfg!(target_os = "macos") {
+            menu_actions.extend(menu::shortcut_pressed(&ctx));
+        }
         if let Some(session) = self.session.as_mut() {
             session.poll();
         }
@@ -1464,6 +1580,20 @@ impl eframe::App for FotogrammaApp {
             self.pending_close = false;
             self.save(&ctx);
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
+        if self.in_window_menu {
+            let state = self.menu_state();
+            egui::Panel::top("menu-bar")
+                .show_separator_line(false)
+                .frame(
+                    egui::Frame::NONE
+                        .fill(theme::BG_DEEP)
+                        .inner_margin(egui::Margin::symmetric(12, 2)),
+                )
+                .show(ui, |ui| {
+                    menu_actions.extend(menu::show_bar(ui, &state));
+                });
         }
 
         egui::Panel::bottom("status-bar")
@@ -1504,6 +1634,12 @@ impl eframe::App for FotogrammaApp {
                 }
             });
 
+        for action in menu_actions {
+            self.handle_menu_action(action, &ctx);
+        }
+        if self.show_about && crate::dialogs::show_about(&ctx, self.logo.as_ref()) {
+            self.show_about = false;
+        }
         self.show_dialogs(&ctx);
         if self.is_busy() || self.conversion_dialog.is_some() {
             ctx.request_repaint_after(Duration::from_millis(80));
@@ -2252,5 +2388,126 @@ mod small_snapshot_tests {
         // The test harness panics on a glyph nothing can draw, so reaching the
         // end proves every character of the names has a font.
         harness.run();
+    }
+
+    #[test]
+    fn the_menu_changes_the_view_and_the_selection() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let ctx = harness.ctx.clone();
+        let app = harness.state_mut();
+        app.handle_menu_action(MenuAction::FilterCompatible, &ctx);
+        assert_eq!(app.filter, FilterCategory::Compatible);
+        app.handle_menu_action(MenuAction::FilterConvert, &ctx);
+        assert_eq!(app.filter, FilterCategory::Convert);
+        app.handle_menu_action(MenuAction::SelectAll, &ctx);
+        assert_eq!(app.selected.len(), 2, "both videos to convert");
+        app.handle_menu_action(MenuAction::ClearSelection, &ctx);
+        assert!(app.selected.is_empty());
+        app.handle_menu_action(MenuAction::FocusSearch, &ctx);
+        assert!(app.focus_search);
+        app.handle_menu_action(MenuAction::Settings, &ctx);
+        assert!(app.show_settings);
+        app.show_settings = false;
+        app.handle_menu_action(MenuAction::About, &ctx);
+        assert!(app.show_about);
+    }
+
+    #[test]
+    fn the_menu_does_nothing_underneath_an_open_window() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let ctx = harness.ctx.clone();
+        let app = harness.state_mut();
+        app.show_settings = true;
+        app.handle_menu_action(MenuAction::FilterErrors, &ctx);
+        assert_eq!(
+            app.filter,
+            FilterCategory::All,
+            "the Settings window has the focus"
+        );
+        app.handle_menu_action(MenuAction::Scan, &ctx);
+        assert!(!app.scanning);
+    }
+
+    #[test]
+    fn convert_selected_in_the_menu_opens_the_dialog_only_with_a_selection() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let ctx = harness.ctx.clone();
+        let app = harness.state_mut();
+        app.handle_menu_action(MenuAction::ConvertSelected, &ctx);
+        assert!(app.conversion_dialog.is_none(), "nothing is selected");
+        app.selected.insert(PathBuf::from("/Filmati/Tramonto.mkv"));
+        app.handle_menu_action(MenuAction::ConvertSelected, &ctx);
+        assert!(app.conversion_dialog.is_some());
+    }
+
+    #[test]
+    fn the_in_window_menu_has_every_menu_and_its_items_work() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.in_window_menu = true;
+                app
+            });
+        harness.run();
+        for title in ["File", "Modifica", "Vista", "Finestra", "Aiuto"] {
+            harness.get_by_label(title);
+        }
+        harness.get_by_label("Modifica").click();
+        harness.run();
+        harness.step();
+        // The menu opens on the frame after the click.
+        harness.get_by_label_contains("Impostazioni…").click();
+        harness.run();
+        assert!(
+            harness.state().show_settings,
+            "the menu item opened Settings"
+        );
+    }
+
+    #[test]
+    fn the_about_window_says_what_the_app_is() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.show_about = true;
+                app
+            });
+        harness.run();
+        harness.get_by_label_contains("MIT");
+        harness.get_by_label_contains(env!("CARGO_PKG_VERSION"));
+        harness.get_by_label("Chiudi").click();
+        harness.run();
+        assert!(!harness.state().show_about);
+    }
+
+    #[test]
+    fn menu_labels_are_in_english_too() {
+        let _lang = lang_guard();
+        set_lang(Lang::En);
+        assert_eq!(MenuAction::Scan.label(), "Scan Library");
+        assert_eq!(MenuAction::Settings.label(), "Settings…");
+        for action in menu::ALL_ACTIONS {
+            assert!(!action.label().is_empty(), "{action:?}");
+        }
+        let titles: Vec<&str> = menu::menus(false).iter().map(|menu| menu.title).collect();
+        assert_eq!(titles, vec!["File", "Edit", "View", "Window", "Help"]);
     }
 }

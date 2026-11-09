@@ -2016,6 +2016,70 @@ pub fn show_update(ctx: &egui::Context, dialog: &mut UpdateDialog, busy: bool) -
     action
 }
 
+/// "About Fotogramma": version, license and what is bundled. True when closed.
+pub fn show_about(ctx: &egui::Context, logo: Option<&egui::TextureHandle>) -> bool {
+    let mut closed = false;
+    let modal = egui::Modal::new(egui::Id::unique("about-dialog"))
+        .frame(modal_frame())
+        .show(ctx, |ui| {
+            ui.set_min_width(420.0);
+            ui.set_max_width(480.0);
+            ui.horizontal(|ui| {
+                if let Some(logo) = logo {
+                    ui.add(egui::Image::new(logo).fit_to_exact_size(egui::Vec2::splat(64.0)));
+                }
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Fotogramma").size(26.0).strong());
+                    ui.label(
+                        RichText::new(fotogramma_core::tr!(
+                            "Versione {}",
+                            "Version {}",
+                            env!("CARGO_PKG_VERSION")
+                        ))
+                        .color(theme::MUTED),
+                    );
+                    ui.label(RichText::new("H.265 cinema library").small().color(theme::MUTED));
+                });
+            });
+            ui.add_space(8.0);
+            ui.label(tr_str(
+                "Trova i video non ancora H.265 e li converte con FFmpeg, con il controllo di ogni passaggio.",
+                "Finds the videos that are not H.265 yet and converts them with FFmpeg, with control over every step.",
+            ));
+            ui.add_space(6.0);
+            for text in [
+                tr_str(
+                    "Programma distribuito con licenza MIT, «così com’è», senza garanzie.",
+                    "Released under the MIT License, “as is”, without warranty.",
+                ),
+                tr_str(
+                    "Include FFmpeg e x265, compilati con --enable-gpl (GPL v2 o successiva).",
+                    "Includes FFmpeg and x265, built with --enable-gpl (GPL v2 or later).",
+                ),
+                tr_str(
+                    "Font: Outfit e IBM Plex Mono (SIL Open Font License).",
+                    "Fonts: Outfit and IBM Plex Mono (SIL Open Font License).",
+                ),
+                tr_str(
+                    "Non invia dati sulla tua libreria. L’unica richiesta di rete è il controllo degli aggiornamenti.",
+                    "Sends nothing about your library. The only network request is the update check.",
+                ),
+            ] {
+                ui.label(RichText::new(text).small().color(theme::MUTED));
+            }
+            ui.add_space(10.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(theme::primary_button(tr_str("Chiudi", "Close")))
+                    .clicked()
+                {
+                    closed = true;
+                }
+            });
+        });
+    closed || modal.should_close()
+}
+
 /// "Interrupted conversions: resume?" shown at startup.
 pub enum ResumeChoice {
     Resume,
