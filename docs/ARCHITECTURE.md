@@ -52,7 +52,7 @@ On macOS, `tool_environment()` points `DYLD_LIBRARY_PATH` at the tool folder whe
 
 ### `crates/core/src/conversion.rs`
 
-`ConversionProfile` defines CRF, preset, pixel format, tune, AQ mode, and audio behavior. The built-in profiles are `max_quality`, `balanced`, and `fast`, plus `custom_profile`.
+`ConversionProfile` defines CRF, preset, pixel format, tune, AQ mode, and audio behavior. The built-in profiles are `max_quality` (veryslow, about 6x the time of `balanced`), `high_quality` (CRF 20, slow, AQ 3: nearly the same quality in a third of the time), `balanced`, and `fast`, plus `custom_profile`. The conversion dialog explains the differences in a collapsible comparison (`profile_comparison`); the times there are indicative.
 
 `build_ffmpeg_args()` generates:
 

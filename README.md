@@ -86,7 +86,8 @@ The **Custom** profile can be saved under a name (up to 40 characters) and appea
 
 | Preset | Intended use | Video settings | Default audio |
 | --- | --- | --- | --- |
-| Maximum quality and compression | Best quality/size ratio, even if slow | CRF 20, `veryslow`, AQ mode 3, 10-bit | Original |
+| Maximum quality and compression | Smallest file at this quality; very slow (about 6x Intermediate) | CRF 20, `veryslow`, AQ mode 3, 10-bit | Original |
+| High quality · recommended for the archive | Nearly the same quality as Maximum in about a third of the time | CRF 20, `slow`, AQ mode 3, 10-bit | Original |
 | Intermediate · good quality | Balanced quality, size, and speed | CRF 22, `medium`, 10-bit | Original |
 | Fast · quick transcode | Maximum transcoding speed | CRF 26, `ultrafast`, 8-bit | Original |
 | Custom | Manual control | CRF, preset, pixel format, tune (none, animation, grain), AQ mode | Original or AAC |

@@ -2055,6 +2055,29 @@ mod small_snapshot_tests {
     }
 
     #[test]
+    fn the_profile_comparison_explains_the_choice() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.selected.insert(PathBuf::from("/Filmati/Tramonto.mkv"));
+                let selected = app.selected_videos();
+                app.conversion_dialog = Some(ConversionDialog::new(selected, &app.settings));
+                app
+            });
+        harness.run();
+        harness.get_by_label("Quale profilo scegliere?").click();
+        harness.run();
+        harness.step();
+        for _ in 0..10 {
+            harness.step();
+        }
+        harness.snapshot("conversion-dialog-profiles");
+    }
+
+    #[test]
     fn accepted_codecs_reclassify_the_loaded_library() {
         let _lang = lang_guard();
         let mut harness = egui_kittest::Harness::builder()

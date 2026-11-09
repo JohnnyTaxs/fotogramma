@@ -179,8 +179,8 @@ pub fn builtin_profiles() -> Vec<ConversionProfile> {
         "max_quality",
         tr_str("Massima qualità e compressione", "Maximum quality and compression"),
         tr_str(
-            "Il miglior rapporto qualità/dimensione, senza fretta: CRF 20, preset veryslow e AQ mode 3.",
-            "The best quality/size ratio, without hurry: CRF 20, veryslow preset and AQ mode 3.",
+            "Il file più piccolo possibile a questa qualità (CRF 20, preset veryslow, AQ mode 3, 10 bit). È molto lento: indicativamente il triplo di Alta qualità per risparmiare solo il 2-3% di spazio. Un film lungo può richiedere ore.",
+            "The smallest possible file at this quality (CRF 20, veryslow preset, AQ mode 3, 10-bit). It is very slow: roughly three times High quality to save only 2-3% of space. A long film can take hours.",
         ),
         20,
         "veryslow",
@@ -188,14 +188,28 @@ pub fn builtin_profiles() -> Vec<ConversionProfile> {
     );
     maximum.aq_mode = Some(3);
 
+    let mut high = ConversionProfile::new(
+        "high_quality",
+        tr_str("Alta qualità · consigliato per l'archivio", "High quality · recommended for the archive"),
+        tr_str(
+            "Qualità quasi identica alla massima in molto meno tempo (CRF 20, preset slow, AQ mode 3, 10 bit). È il compromesso giusto per un archivio.",
+            "Quality almost identical to Maximum in much less time (CRF 20, slow preset, AQ mode 3, 10-bit). The right compromise for an archive.",
+        ),
+        20,
+        "slow",
+        "yuv420p10le",
+    );
+    high.aq_mode = Some(3);
+
     vec![
         maximum,
+        high,
         ConversionProfile::new(
             "balanced",
             tr_str("Intermedio · buona qualità", "Intermediate · good quality"),
             tr_str(
-                "Buon equilibrio tra qualità, spazio e tempo: CRF 22 e preset medium.",
-                "A good balance of quality, size and time: CRF 22 and medium preset.",
+                "Buon equilibrio tra qualità, spazio e tempo (CRF 22, preset medium, 10 bit): file più piccolo di Alta qualità, con un po' meno qualità.",
+                "A good balance of quality, size and time (CRF 22, medium preset, 10-bit): a smaller file than High quality, with a little less quality.",
             ),
             22,
             "medium",
@@ -205,8 +219,8 @@ pub fn builtin_profiles() -> Vec<ConversionProfile> {
             "fast",
             tr_str("Veloce · transcode rapido", "Fast · quick transcode"),
             tr_str(
-                "Massima velocità disponibile: CRF 26, preset ultrafast e video 8-bit.",
-                "Maximum available speed: CRF 26, ultrafast preset and 8-bit video.",
+                "Massima velocità (CRF 26, preset ultrafast, 8 bit): molto più rapido, ma la qualità è più bassa e il file si comprime poco.",
+                "Maximum speed (CRF 26, ultrafast preset, 8-bit): much faster, but quality is lower and the file is compressed less.",
             ),
             26,
             "ultrafast",
@@ -412,6 +426,10 @@ mod tests {
 
     #[test]
     fn maximum_quality_uses_aq_mode_three() {
+        let high = profile("high_quality").unwrap();
+        assert_eq!((high.crf, high.preset.as_str()), (20, "slow"));
+        assert_eq!(high.aq_mode, Some(3));
+        assert_eq!(high.pixel_format, "yuv420p10le");
         let maximum = profile("max_quality").unwrap();
         assert_eq!(maximum.aq_mode, Some(3));
         assert_eq!(maximum.preset, "veryslow");

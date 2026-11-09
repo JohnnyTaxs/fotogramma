@@ -354,6 +354,16 @@ impl ConversionDialog {
     fn form(&mut self, ui: &mut egui::Ui) {
         let custom = self.profile_key == "custom";
         let mut selected_profile = self.profile_key.clone();
+        let description = if self.profile_key == "custom" {
+            tr_str("Configura manualmente i parametri video. Audio e contenitore restano modificabili in ogni profilo.", "Configure the video parameters manually. Audio and container can be changed in every profile.").to_string()
+        } else {
+            builtin_profile(&self.profile_key)
+                .map(|profile| profile.description)
+                .unwrap_or_default()
+        };
+        ui.label(RichText::new(description).small().color(theme::MUTED));
+        profile_comparison(ui);
+        ui.add_space(6.0);
         egui::Grid::new("conversion-form")
             .num_columns(2)
             .spacing([18.0, 4.0])
@@ -615,14 +625,6 @@ impl ConversionDialog {
             self.apply_profile();
         }
 
-        let description = if self.profile_key == "custom" {
-            tr_str("Configura manualmente i parametri video. Audio e contenitore restano modificabili in ogni profilo.", "Configure the video parameters manually. Audio and container can be changed in every profile.").to_string()
-        } else {
-            builtin_profile(&self.profile_key)
-                .map(|profile| profile.description)
-                .unwrap_or_default()
-        };
-        ui.label(RichText::new(description).small().color(theme::MUTED));
         if self.content == "auto" {
             let text = match self.detected {
                 Some(kind) => fotogramma_core::tr!(
@@ -2014,6 +2016,94 @@ pub fn show_update(ctx: &egui::Context, dialog: &mut UpdateDialog, busy: bool) -
         action = UpdateAction::Later;
     }
     action
+}
+
+/// How the built-in profiles differ, so the choice is not a guess. The times
+/// are relative to Intermediate and indicative: they depend on the video and
+/// on the processor.
+fn profile_comparison(ui: &mut egui::Ui) {
+    egui::CollapsingHeader::new(
+        RichText::new(tr_str("Quale profilo scegliere?", "Which profile to choose?"))
+            .small()
+            .color(theme::LAVENDER),
+    )
+    .id_salt("profile-comparison")
+    .default_open(false)
+    .show(ui, |ui| {
+        let rows: [(&str, &str, &str, &str); 4] = [
+            (
+                "max_quality",
+                tr_str("circa 6×", "about 6×"),
+                tr_str("il più piccolo", "the smallest"),
+                tr_str(
+                    "Solo se il tempo non conta: la differenza con Alta qualità è minima.",
+                    "Only if time does not matter: the difference from High quality is tiny.",
+                ),
+            ),
+            (
+                "high_quality",
+                tr_str("circa 2×", "about 2×"),
+                tr_str("quasi come il massimo", "almost as small as Maximum"),
+                tr_str(
+                    "La scelta per un archivio: quasi la stessa qualità in un terzo del tempo.",
+                    "The choice for an archive: nearly the same quality in a third of the time.",
+                ),
+            ),
+            (
+                "balanced",
+                tr_str("1×", "1×"),
+                tr_str("più grande del massimo", "larger than Maximum"),
+                tr_str(
+                    "Per molti file o poco tempo: buona qualità, file un po' meno compresso.",
+                    "For many files or little time: good quality, a slightly less compressed file.",
+                ),
+            ),
+            (
+                "fast",
+                tr_str("circa 0,1×", "about 0.1×"),
+                tr_str("il più grande", "the largest"),
+                tr_str(
+                    "Per una prova o per liberare il PC: qualità più bassa e poco spazio risparmiato.",
+                    "For a test or to free the PC: lower quality and little space saved.",
+                ),
+            ),
+        ];
+        egui::Grid::new("profile-comparison-grid")
+            .num_columns(4)
+            .spacing([14.0, 4.0])
+            .show(ui, |ui| {
+                for title in [
+                    tr_str("Profilo", "Profile"),
+                    tr_str("Tempo", "Time"),
+                    tr_str("File", "File"),
+                    tr_str("Quando usarlo", "When to use it"),
+                ] {
+                    ui.label(RichText::new(title).small().color(theme::LAVENDER));
+                }
+                ui.end_row();
+                for (key, time, size, when) in rows {
+                    let name = builtin_profile(key)
+                        .map(|profile| profile.label)
+                        .unwrap_or_default();
+                    ui.label(RichText::new(name).small());
+                    ui.label(RichText::new(time).small().color(theme::MUTED));
+                    ui.label(RichText::new(size).small().color(theme::MUTED));
+                    ui.add(
+                        egui::Label::new(RichText::new(when).small().color(theme::MUTED)).wrap(),
+                    );
+                    ui.end_row();
+                }
+            });
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(tr_str(
+                "Tempi indicativi rispetto a Intermedio: cambiano con il video e con il processore. Una conversione parte da una stima prudente che migliora dopo qualche minuto. Il CRF più basso dà più qualità e file più grande; il preset più lento comprime meglio a parità di qualità.",
+                "Times are indicative, relative to Intermediate: they change with the video and the processor. A conversion starts from a cautious estimate that improves after a few minutes. A lower CRF gives more quality and a larger file; a slower preset compresses better at the same quality.",
+            ))
+            .small()
+            .color(theme::MUTED),
+        );
+    });
 }
 
 /// "About Fotogramma": version, license and what is bundled. True when closed.
