@@ -97,6 +97,8 @@ pub struct FotogrammaApp {
     close_after_scan_at: Option<Instant>,
     started_at: Instant,
     last_size: Vec2,
+    /// Bottom edge of the central panel: the table takes what is left of it.
+    panel_bottom: f32,
     show_settings: bool,
     show_about: bool,
     /// Move the keyboard focus to the search field at the next frame.
@@ -173,6 +175,7 @@ impl FotogrammaApp {
             close_after_scan_at: None,
             started_at: Instant::now(),
             last_size: Vec2::new(1280.0, 820.0),
+            panel_bottom: 0.0,
             show_settings: false,
             show_about: false,
             focus_search: false,
@@ -1420,7 +1423,10 @@ impl FotogrammaApp {
 
         let mut action = None;
         ui.scope(|ui| {
-            let height = (ui.available_height() - 26.0).max(120.0);
+            // What is left of the panel, but never so little that the table is
+            // unreadable: then the whole page scrolls.
+            let left = self.panel_bottom - ui.cursor().top();
+            let height = (left - 26.0).max(260.0);
             ui.allocate_ui(Vec2::new(ui.available_width(), height), |ui| {
                 action = table::show(
                     ui,
@@ -1628,15 +1634,22 @@ impl eframe::App for FotogrammaApp {
                     }),
             )
             .show(ui, |ui| {
-                self.header(ui);
-                ui.add_space(10.0);
-                self.control_deck(ui, &ctx);
-                ui.add_space(14.0);
-                match self.page.clone() {
-                    Page::Welcome => self.welcome_page(ui),
-                    Page::Results => self.results_page(ui, &ctx),
-                    Page::Error(message) => self.error_page(ui, &ctx, &message),
-                }
+                self.panel_bottom = ui.max_rect().bottom();
+                // A window too small for everything scrolls instead of
+                // cutting the text off.
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.header(ui);
+                        ui.add_space(10.0);
+                        self.control_deck(ui, &ctx);
+                        ui.add_space(14.0);
+                        match self.page.clone() {
+                            Page::Welcome => self.welcome_page(ui),
+                            Page::Results => self.results_page(ui, &ctx),
+                            Page::Error(message) => self.error_page(ui, &ctx, &message),
+                        }
+                    });
             });
 
         for action in menu_actions {
@@ -2514,5 +2527,15 @@ mod small_snapshot_tests {
         }
         let titles: Vec<&str> = menu::menus(false).iter().map(|menu| menu.title).collect();
         assert_eq!(titles, vec!["File", "Edit", "View", "Window", "Help"]);
+    }
+
+    #[test]
+    fn a_very_small_window_scrolls_instead_of_cutting_the_table() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(900.0, 460.0))
+            .build_eframe(demo_app);
+        harness.run();
+        harness.snapshot("main-window-tiny");
     }
 }
