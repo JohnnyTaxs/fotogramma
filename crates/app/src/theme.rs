@@ -95,7 +95,8 @@ fn visuals() -> Visuals {
     let mut visuals = Visuals::dark();
     visuals.panel_fill = BG;
     visuals.window_fill = SURFACE;
-    visuals.window_stroke = Stroke::new(1.0, CORAL);
+    // Popups and dropdown lists take this outline: a soft purple, not coral.
+    visuals.window_stroke = Stroke::new(1.0, INPUT_BORDER);
     visuals.extreme_bg_color = BG_DEEP;
     visuals.faint_bg_color = SURFACE_ALT;
     visuals.override_text_color = Some(TEXT);
@@ -132,7 +133,7 @@ fn visuals() -> Visuals {
 
     widgets.open.bg_fill = SURFACE;
     widgets.open.weak_bg_fill = SURFACE;
-    widgets.open.bg_stroke = Stroke::new(1.0, CORAL);
+    widgets.open.bg_stroke = Stroke::new(1.0, INPUT_BORDER);
     widgets.open.fg_stroke = Stroke::new(1.0, TEXT);
     widgets.open.corner_radius = CornerRadius::same(8);
     visuals
