@@ -24,6 +24,20 @@ Many tools already transcode video, from HandBrake to automated library transcod
 
 It is a small native desktop app, not a service: no server, no database, no account, nothing to deploy next to your media stack.
 
+## Alternatives
+
+If Fotogramma is not what you need, these are the tools I would look at (their own descriptions, checked in November 2026):
+
+| Tool | What it is | Pick it when |
+| --- | --- | --- |
+| [Tdarr](https://tdarr.io) | A server with worker nodes and a web interface that watches libraries and re-encodes by rules and plugins, with FFmpeg or HandBrake. Version 2 is not open source. | You want it automatic and continuous, on several machines, with GPU encoding. |
+| [Unmanic](https://github.com/Unmanic/unmanic) | A simpler single-node library optimiser, plugin based, open source. | You want the same automation on one server, with less to set up. |
+| [FileFlows](https://fileflows.com) | Visual flows for processing a library, built on .NET. | You like building the pipeline as a diagram. |
+| [HandBrake](https://handbrake.fr) | The classic graphical transcoder, open source. | You convert files one at a time, or from a queue you fill by hand, and do not need a library scan. |
+| [HBBatchBeast](https://github.com/HaveAGitGat/HBBatchBeast) | A graphical front end for HandBrake and FFmpeg with recursive folder scans and folder watching. | You want to batch a whole folder tree to a mirrored output folder. |
+
+Fotogramma is the one that shows you the library first (what is not H.265, how much space it holds), lets you choose each conversion, and never replaces an original without a full check. It does not watch folders, run on several machines, or use a GPU encoder.
+
 ## Features
 
 - Native desktop window for macOS, Windows, and Linux.
@@ -122,7 +136,7 @@ There is no macOS Intel build. Each package carries its own `ffmpeg` and `ffprob
 These are choices, not oversights:
 
 - **Software encoding only (x265), no hardware acceleration.** Hardware encoders (VideoToolbox, NVENC, QuickSync, AMF) are much faster but give a worse quality for the same size. Fotogramma is about getting the best H.265 out of a file, so it does not offer them and there is no plan to.
-- **One conversion at a time.** (A queue can be paused and resumed, but never runs in parallel.) The queue is sequential on purpose: x265 already uses every core, and parallel jobs only saturate the CPU and the disk.
+- **One conversion at a time.** (A queue can be paused, resumed and run in the background, with more batches added behind it, but it never runs in parallel.) The queue is sequential on purpose: x265 already uses every core, and parallel jobs only saturate the CPU and the disk.
 - **Only the first video stream is analyzed** (`v:0`) of `.mp4`, `.mkv`, and `.webm`. A file with several video streams is classified by its first one; the conversion itself keeps every stream (`-map 0`).
 - **Replacing an original does not work with WebM.** The WebM container only allows VP8, VP9 and AV1 video, so an HEVC result cannot stay a `.webm`: it has to become `.mkv` or `.mp4`. Replacing means swapping the verified result into the original's exact path with a backup, and a different extension would break that guarantee. WebM files can still be converted: the result is a new `.mkv` or `.mp4` next to them, and the original is left alone.
 - **No macOS notarization.** The app is ad-hoc signed but not notarized (that needs a paid Apple developer account), so Gatekeeper asks you to confirm the first launch.
