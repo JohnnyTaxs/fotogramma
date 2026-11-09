@@ -1810,7 +1810,7 @@ fn accepted_summary(accepted: &[String]) -> String {
 }
 
 fn load_logo(ctx: &egui::Context) -> Option<egui::TextureHandle> {
-    const PNG: &[u8] = include_bytes!("../../../deployment/fotogramma.iconset/icon_64x64@2x.png");
+    const PNG: &[u8] = include_bytes!("../../../deployment/Fotogramma-window.png");
     let image = image::load_from_memory(PNG).ok()?.to_rgba8();
     let size = [image.width() as usize, image.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());

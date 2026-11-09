@@ -120,3 +120,7 @@ The macOS build is ad-hoc signed but not notarized. On macOS 15 and later, allow
 ## Licensing
 
 The bundled FFmpeg is configured with `--enable-gpl --enable-libx265`. The FFmpeg source, build flags, and x265 dependency are published here; the application source remains MIT.
+
+## Icons
+
+`deployment/make_icons.py` (needs Pillow) rebuilds `fotogramma.iconset/`, `Fotogramma.icns` (macOS only, through `iconutil`), `Fotogramma.ico` and `Fotogramma-window.png` from `Fotogramma.png`. The macOS icon has the usual margin and shadow; the Windows icon and the logo inside the app fill the canvas. Do not edit the PNGs by hand.
