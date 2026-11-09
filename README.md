@@ -281,6 +281,10 @@ docs/                      Architecture, CI/CD, demo assets, release notes
 static/fonts/              Embedded fonts and their licenses
 ```
 
+## AI involvement
+
+Fotogramma is developed with the help of an AI coding assistant, [Claude](https://www.anthropic.com/claude) (Anthropic), used through Claude Code. The assistant wrote a large part of the code, tests, documentation and build scripts, working from the maintainer's requests; the maintainer decides what the app does, runs it on real libraries and on Windows, macOS and Linux, and publishes every release. [`AGENTS.md`](AGENTS.md) is the guide the assistant follows, and the test suite and CI checks described below are what keep its changes honest. As with any software, read the code and the [license](#privacy-and-license) before trusting it with files you cannot replace, and keep the default mode (originals are never overwritten) until you have.
+
 ## Issues and contributing
 
 This is a personal project, so there is no support promise, but bug reports are welcome on the [issue tracker](https://github.com/JohnnyTaxs/fotogramma/issues). If you want to change the code, [`AGENTS.md`](AGENTS.md) lists the rules the project follows (native desktop only, originals never overwritten by default, both languages for every string, the size budget) and the checks to run before a change.
