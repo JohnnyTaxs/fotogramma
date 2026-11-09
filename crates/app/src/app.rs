@@ -481,7 +481,9 @@ impl FotogrammaApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
             }
             // Goes through the same close handling, which asks first when a job runs.
-            MenuAction::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            MenuAction::CloseWindow | MenuAction::Quit => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close)
+            }
         }
         ctx.request_repaint();
     }

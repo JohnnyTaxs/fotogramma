@@ -12,6 +12,7 @@ pub enum MenuAction {
     Scan,
     Export,
     ConvertSelected,
+    CloseWindow,
     SelectAll,
     ClearSelection,
     FocusSearch,
@@ -27,11 +28,12 @@ pub enum MenuAction {
     Quit,
 }
 
-pub const ALL_ACTIONS: [MenuAction; 17] = [
+pub const ALL_ACTIONS: [MenuAction; 18] = [
     MenuAction::ChooseFolder,
     MenuAction::Scan,
     MenuAction::Export,
     MenuAction::ConvertSelected,
+    MenuAction::CloseWindow,
     MenuAction::SelectAll,
     MenuAction::ClearSelection,
     MenuAction::FocusSearch,
@@ -117,6 +119,7 @@ impl MenuAction {
             MenuAction::Scan => tr_str("Analizza libreria", "Scan Library"),
             MenuAction::Export => tr_str("Esporta da convertire…", "Export To Convert…"),
             MenuAction::ConvertSelected => tr_str("Converti selezionati…", "Convert Selected…"),
+            MenuAction::CloseWindow => tr_str("Chiudi finestra", "Close Window"),
             MenuAction::SelectAll => {
                 tr_str("Seleziona tutti da convertire", "Select All To Convert")
             }
@@ -141,6 +144,7 @@ impl MenuAction {
             MenuAction::Scan => plain(Key::R),
             MenuAction::Export => plain(Key::E),
             MenuAction::ConvertSelected => plain(Key::Enter),
+            MenuAction::CloseWindow => plain(Key::W),
             MenuAction::SelectAll => shifted(Key::A),
             MenuAction::ClearSelection => shifted(Key::D),
             MenuAction::FocusSearch => plain(Key::F),
@@ -189,6 +193,8 @@ pub fn menus(native_app_menu: bool) -> Vec<Menu> {
         Separator,
         Action(MenuAction::Export),
         Action(MenuAction::ConvertSelected),
+        Separator,
+        Action(MenuAction::CloseWindow),
     ];
     let mut edit = vec![
         Action(MenuAction::SelectAll),
@@ -283,6 +289,7 @@ impl MenuState {
             MenuAction::About
             | MenuAction::Minimize
             | MenuAction::ToggleMaximize
+            | MenuAction::CloseWindow
             | MenuAction::Quit => true,
         }
     }

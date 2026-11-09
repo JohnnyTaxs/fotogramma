@@ -301,7 +301,14 @@ pub fn build_ffmpeg_args(
         .to_lowercase()
         .ends_with(".mp4")
     {
-        args.extend(["-movflags".to_string(), "+faststart".to_string()]);
+        // `hev1` is what FFmpeg writes by default; QuickTime and Safari only
+        // play HEVC in MP4 when it is tagged `hvc1`.
+        args.extend([
+            "-tag:v".to_string(),
+            "hvc1".to_string(),
+            "-movflags".to_string(),
+            "+faststart".to_string(),
+        ]);
     }
     args.extend(["-progress".to_string(), "pipe:1".to_string()]);
     args.push(destination.to_string_lossy().into_owned());
@@ -451,6 +458,10 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|pair| pair == ["-movflags", "+faststart"]));
+        assert!(
+            args.windows(2).any(|pair| pair == ["-tag:v", "hvc1"]),
+            "MP4 output is tagged hvc1 so Apple players open it"
+        );
     }
 
     #[test]
