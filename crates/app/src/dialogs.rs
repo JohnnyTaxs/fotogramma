@@ -1494,21 +1494,48 @@ pub enum CloseChoice {
     KeepOpen,
 }
 
-pub fn show_close_confirm(ctx: &egui::Context) -> Option<CloseChoice> {
+/// What is running when the user closes the window.
+pub struct CloseContext {
+    pub converting: bool,
+    /// Batches waiting behind the running conversion.
+    pub waiting: usize,
+}
+
+pub fn show_close_confirm(ctx: &egui::Context, running: &CloseContext) -> Option<CloseChoice> {
     let mut choice = None;
     let modal = egui::Modal::new(egui::Id::unique("close-confirm"))
         .frame(modal_frame())
         .show(ctx, |ui| {
             ui.set_min_width(480.0);
-            ui.label(
-                RichText::new(tr_str("Analisi in corso", "Scan in progress"))
-                    .size(21.0)
-                    .strong(),
-            );
-            ui.label(tr_str(
-                "Vuoi interrompere l’analisi e chiudere Fotogramma?",
-                "Do you want to stop the scan and close Fotogramma?",
-            ));
+            let (title, question) = if running.converting {
+                (
+                    tr_str("Conversione in corso", "Conversion in progress"),
+                    tr_str(
+                        "Vuoi interrompere la conversione e chiudere Fotogramma?",
+                        "Do you want to stop the conversion and close Fotogramma?",
+                    ),
+                )
+            } else {
+                (
+                    tr_str("Analisi in corso", "Scan in progress"),
+                    tr_str(
+                        "Vuoi interrompere l’analisi e chiudere Fotogramma?",
+                        "Do you want to stop the scan and close Fotogramma?",
+                    ),
+                )
+            };
+            ui.label(RichText::new(title).size(21.0).strong());
+            ui.label(question);
+            if running.converting && running.waiting > 0 {
+                ui.label(
+                    RichText::new(fotogramma_core::tr!(
+                        "Anche i {} gruppi di video in coda andranno persi: alla prossima apertura non ripartiranno.",
+                        "The {} queued batches of videos will be lost too: they will not start again next time.",
+                        running.waiting
+                    ))
+                    .color(theme::CORAL_HOVER),
+                );
+            }
             ui.add_space(8.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui

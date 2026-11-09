@@ -820,7 +820,14 @@ impl FotogrammaApp {
         }
 
         if self.close_confirm {
-            match dialogs::show_close_confirm(ctx) {
+            let running = dialogs::CloseContext {
+                converting: self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.is_running()),
+                waiting: self.waiting.len(),
+            };
+            match dialogs::show_close_confirm(ctx, &running) {
                 Some(CloseChoice::StopAndClose) => {
                     self.close_confirm = false;
                     self.pending_close = true;
@@ -2843,5 +2850,32 @@ mod small_snapshot_tests {
         app.session.as_mut().unwrap().poll();
         app.advance_queue(&ctx);
         assert!(app.waiting.is_empty(), "Stop stops the whole queue");
+    }
+
+    #[test]
+    fn closing_during_a_conversion_mentions_the_queue() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let app = harness.state_mut();
+        let _sender = running_session(app, Vec::new());
+        for _ in 0..2 {
+            app.waiting.push(ConversionPlan {
+                videos: Vec::new(),
+                profile: fotogramma_core::conversion::profile("balanced").unwrap(),
+                destination_dir: PathBuf::from("/x"),
+                container: "mkv".to_string(),
+                replace_original: false,
+                options: crate::worker::ConversionOptions::default(),
+                after: PowerAction::Nothing,
+            });
+        }
+        app.close_confirm = true;
+        harness.run();
+        harness.get_by_label("Vuoi interrompere la conversione e chiudere Fotogramma?");
+        harness.get_by_label_contains("Anche i 2 gruppi di video in coda andranno persi");
     }
 }
