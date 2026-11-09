@@ -101,6 +101,8 @@ pub struct FotogrammaApp {
     panel_bottom: f32,
     show_settings: bool,
     show_about: bool,
+    /// The answer to a manual update check, shown as a small card.
+    update_notice: Option<dialogs::UpdateNotice>,
     /// The conversion runs in the background: a bar instead of a window.
     session_minimized: bool,
     /// Batches added while one runs; they start one after the other.
@@ -184,6 +186,7 @@ impl FotogrammaApp {
             panel_bottom: 0.0,
             show_settings: false,
             show_about: false,
+            update_notice: None,
             session_minimized: false,
             waiting: Vec::new(),
             show_update_prompt: false,
@@ -236,6 +239,9 @@ impl FotogrammaApp {
             return;
         }
         self.update_manual = manual;
+        if manual {
+            self.update_notice = Some(dialogs::UpdateNotice::Checking);
+        }
         self.update_check = Some(worker::spawn_update_check(
             env!("CARGO_PKG_VERSION"),
             ctx.clone(),
@@ -253,26 +259,19 @@ impl FotogrammaApp {
         let manual = self.update_manual;
         match message {
             CheckMessage::Available(release) => {
+                self.update_notice = None;
                 let skipped = self.settings.skipped_update == release.tag;
                 if (manual || !skipped) && self.update.is_none() {
                     self.update = Some(UpdateDialog::new(*release, self.install_target.clone()));
                 }
             }
-            CheckMessage::UpToDate if manual => self.set_status(
-                fotogramma_core::tr!(
-                    "Fotogramma è aggiornato ({})",
-                    "Fotogramma is up to date ({})",
-                    env!("CARGO_PKG_VERSION")
-                ),
-                Duration::from_secs(5),
-            ),
-            CheckMessage::Failed(error) if manual => self.set_status(
-                fotogramma_core::tr!(
-                    "Controllo aggiornamenti non riuscito: {error}",
-                    "Update check failed: {error}"
-                ),
-                Duration::from_secs(7),
-            ),
+            // The card is still there only if the user did not dismiss it.
+            CheckMessage::UpToDate if manual && self.update_notice.is_some() => {
+                self.update_notice = Some(dialogs::UpdateNotice::UpToDate);
+            }
+            CheckMessage::Failed(error) if manual && self.update_notice.is_some() => {
+                self.update_notice = Some(dialogs::UpdateNotice::Failed(error));
+            }
             _ => {}
         }
     }
@@ -444,6 +443,7 @@ impl FotogrammaApp {
             || (self.session.is_some() && !self.session_minimized)
             || self.show_settings
             || self.show_about
+            || self.update_notice.is_some()
             || self.show_update_prompt
             || self.details.is_some()
             || self.update.is_some()
@@ -1784,6 +1784,11 @@ impl eframe::App for FotogrammaApp {
         for action in menu_actions {
             self.handle_menu_action(action, &ctx);
         }
+        if let Some(notice) = self.update_notice.clone() {
+            if dialogs::show_update_notice(&ctx, &notice) {
+                self.update_notice = None;
+            }
+        }
         if self.show_about && crate::dialogs::show_about(&ctx, self.logo.as_ref()) {
             self.show_about = false;
         }
@@ -2877,5 +2882,42 @@ mod small_snapshot_tests {
         harness.run();
         harness.get_by_label("Vuoi interrompere la conversione e chiudere Fotogramma?");
         harness.get_by_label_contains("Anche i 2 gruppi di video in coda andranno persi");
+    }
+
+    #[test]
+    fn a_manual_update_check_answers_with_a_card() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.update_notice = Some(dialogs::UpdateNotice::UpToDate);
+                app
+            });
+        harness.run();
+        harness.get_by_label("Sei aggiornato");
+        harness.get_by_label_contains(env!("CARGO_PKG_VERSION"));
+        harness.snapshot("update-up-to-date");
+        harness.get_by_label("Perfetto").click();
+        harness.run();
+        assert!(harness.state().update_notice.is_none());
+    }
+
+    #[test]
+    fn a_dismissed_check_does_not_come_back_with_its_answer() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let app = harness.state_mut();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        app.update_check = Some(receiver);
+        app.update_manual = true;
+        app.update_notice = None; // the user closed the card
+        sender.send(CheckMessage::UpToDate).unwrap();
+        app.poll_update();
+        assert!(app.update_notice.is_none());
     }
 }

@@ -2325,6 +2325,98 @@ pub fn show_about(ctx: &egui::Context, logo: Option<&egui::TextureHandle>) -> bo
     closed || modal.should_close()
 }
 
+/// The answer to "Check for updates…" when there is no update to offer.
+#[derive(Clone, Debug, PartialEq)]
+pub enum UpdateNotice {
+    Checking,
+    UpToDate,
+    Failed(String),
+}
+
+/// A small friendly card with the result of a manual update check. True when
+/// the user closed it.
+pub fn show_update_notice(ctx: &egui::Context, notice: &UpdateNotice) -> bool {
+    let mut closed = false;
+    let modal = egui::Modal::new(egui::Id::unique("update-notice"))
+        .frame(modal_frame())
+        .show(ctx, |ui| {
+            ui.set_width(340.0);
+            ui.vertical_centered(|ui| {
+                ui.add_space(6.0);
+                match notice {
+                    UpdateNotice::Checking => {
+                        ui.add(egui::Spinner::new().size(40.0).color(theme::CORAL));
+                    }
+                    UpdateNotice::UpToDate => badge(ui, theme::MINT, true),
+                    UpdateNotice::Failed(_) => badge(ui, theme::CORAL, false),
+                }
+                ui.add_space(12.0);
+                let (title, detail) = match notice {
+                    UpdateNotice::Checking => (
+                        tr_str("Controllo in corso…", "Checking…").to_string(),
+                        tr_str(
+                            "Cerco una versione più recente su GitHub.",
+                            "Looking for a newer version on GitHub.",
+                        )
+                        .to_string(),
+                    ),
+                    UpdateNotice::UpToDate => (
+                        tr_str("Sei aggiornato", "You are up to date").to_string(),
+                        fotogramma_core::tr!(
+                            "Fotogramma {} è l’ultima versione disponibile.",
+                            "Fotogramma {} is the latest version.",
+                            env!("CARGO_PKG_VERSION")
+                        ),
+                    ),
+                    UpdateNotice::Failed(error) => (
+                        tr_str("Controllo non riuscito", "Check failed").to_string(),
+                        error.clone(),
+                    ),
+                };
+                ui.label(RichText::new(title).size(22.0).strong());
+                ui.add_space(2.0);
+                ui.add(egui::Label::new(RichText::new(detail).small().color(theme::MUTED)).wrap());
+                ui.add_space(14.0);
+                let label = match notice {
+                    UpdateNotice::Checking => tr_str("Annulla", "Cancel"),
+                    UpdateNotice::UpToDate => tr_str("Perfetto", "Great"),
+                    UpdateNotice::Failed(_) => tr_str("Chiudi", "Close"),
+                };
+                let button = if matches!(notice, UpdateNotice::Checking) {
+                    theme::secondary_button(label)
+                } else {
+                    theme::primary_button(label)
+                };
+                if ui.add(button).clicked() {
+                    closed = true;
+                }
+            });
+        });
+    closed || modal.should_close()
+}
+
+/// A round badge: a check mark, or an exclamation mark.
+fn badge(ui: &mut egui::Ui, color: egui::Color32, check: bool) {
+    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(64.0), egui::Sense::hover());
+    let painter = ui.painter();
+    let centre = rect.center();
+    painter.circle_filled(centre, 32.0, color.gamma_multiply(0.16));
+    painter.circle_stroke(centre, 30.0, egui::Stroke::new(2.0, color));
+    let stroke = egui::Stroke::new(4.0, color);
+    let at = |x: f32, y: f32| egui::pos2(rect.left() + x * 64.0, rect.top() + y * 64.0);
+    if check {
+        painter.add(egui::Shape::line(
+            vec![at(0.30, 0.52), at(0.45, 0.66), at(0.71, 0.36)],
+            stroke,
+        ));
+        painter.circle_filled(at(0.30, 0.52), 2.0, color);
+        painter.circle_filled(at(0.71, 0.36), 2.0, color);
+    } else {
+        painter.line_segment([at(0.5, 0.28), at(0.5, 0.56)], stroke);
+        painter.circle_filled(at(0.5, 0.70), 2.8, color);
+    }
+}
+
 /// The first-run question. `Some(true)` to check at startup, `Some(false)` not to.
 pub fn show_update_prompt(ctx: &egui::Context) -> Option<bool> {
     let mut choice = None;
