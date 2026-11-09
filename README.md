@@ -9,7 +9,7 @@
 
 Fotogramma is a **native desktop application** for inspecting a video library, identifying files that may benefit from H.265 conversion, and converting videos directly with FFmpeg.
 
-It is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no browser, WebView, HTTP server, or launcher. The interface is available in **English and Italian**: it follows the operating system language and can be overridden in Settings. The Python 1.x application has been removed; the repository contains only the Rust workspace.
+It is written in **Rust** with `egui`/`eframe` and renders with OpenGL: no browser, WebView, HTTP server, or launcher. The interface is available in **English and Italian**: it follows the operating system language and can be overridden in Settings.
 
 ![Fotogramma Desktop](docs/assets/fotogramma-native-results.png)
 
@@ -48,20 +48,6 @@ It is a small native desktop app, not a service: no server, no database, no acco
 - **Settings** window: choose which codecs count as already compatible (the home page, statistics, and table update at once, no new scan) and the conversion defaults (replace original, profile, container).
 - Original application icon and Cinema Pop theme.
 - No videos are modified during inspection. No media or metadata is uploaded during scanning or conversion.
-
-## Size
-
-The portable archives are an order of magnitude smaller than the Qt/Python 1.x builds they replaced:
-
-| Platform | Application | ZIP |
-| --- | --- | --- |
-| macOS ARM | 23.6 MB | 10.9 MB (DMG 12.7 MB) |
-| Linux x86_64 | 40.3 MB | 13.3 MB |
-| Windows amd64 | 35.4 MB | 11.1 MB |
-
-The macOS build went from 106 MB and a 44 MB ZIP in 1.0.4 to 23.6 MB and 10.9 MB. The Linux and Windows bundles are larger because x265's x86 assembly is about twice the size of the arm64 build, and the C++ runtime travels inside that library instead of as a separate file.
-
-The bundle contains the Rust binary, the original icon, and a purpose-built FFmpeg with only the containers, codecs, and filters the app uses. CI fails the build if the application exceeds 45 MB or the ZIP exceeds 18 MB.
 
 ## Settings
 
