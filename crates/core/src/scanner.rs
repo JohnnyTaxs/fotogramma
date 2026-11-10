@@ -457,7 +457,9 @@ pub fn probe_video(
     let duration = format
         .and_then(|value| value.get("duration"))
         .and_then(number);
-    let format_size = format.and_then(|value| value.get("size")).and_then(integer);
+    let format_size = format
+        .and_then(|value| value.get("size"))
+        .and_then(byte_count);
     let category = if COMPATIBLE_CODECS.contains(&codec.as_str()) {
         Category::Compatible
     } else {
@@ -480,7 +482,7 @@ pub fn probe_video(
         extension: extension_of(file_path),
         category,
         codec: Some(codec),
-        size: format_size.map(u64::from).or(size),
+        size: format_size.or(size),
         duration,
         width: stream.get("width").and_then(integer),
         height: stream.get("height").and_then(integer),
@@ -639,6 +641,17 @@ fn integer(value: &serde_json::Value) -> Option<u32> {
     number(value).map(|value| value as u32)
 }
 
+/// A size in bytes. It is 64 bits on purpose: as a `u32` every file of 4 GiB
+/// or more came out as exactly 4 GiB, and with it its bitrate, the totals and
+/// the advice.
+fn byte_count(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_u64(),
+        serde_json::Value::String(text) => text.trim().parse::<u64>().ok(),
+        _ => None,
+    }
+}
+
 fn truncate_chars(value: &str, limit: usize) -> String {
     value.chars().take(limit).collect()
 }
@@ -657,6 +670,19 @@ pub fn process_command(program: &Path) -> Command {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_size_over_four_gib_is_not_cut_to_four_gib() {
+        // The real size of a 1080p remux, as ffprobe prints it (a string).
+        let size = serde_json::json!("19798415637");
+        assert_eq!(super::byte_count(&size), Some(19_798_415_637));
+        assert_eq!(
+            super::byte_count(&serde_json::json!(19_798_415_637u64)),
+            Some(19_798_415_637)
+        );
+        assert_eq!(super::byte_count(&serde_json::json!("not a number")), None);
+        assert_eq!(super::byte_count(&serde_json::json!(-5)), None);
+    }
+
     use super::*;
 
     #[test]

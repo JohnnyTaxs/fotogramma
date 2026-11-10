@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const VERSION: u32 = 1;
+// 2: sizes of 4 GiB and more were stored as 4 GiB; the old entries are dropped.
+const VERSION: u32 = 2;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Entry {
