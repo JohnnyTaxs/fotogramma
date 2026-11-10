@@ -65,6 +65,8 @@ Fotogramma is the one that shows you the library first (what is not H.265, how m
 - Original application icon and Cinema Pop theme.
 - No videos are modified during inspection. No media or metadata is uploaded during scanning or conversion.
 
+![Conversion in progress, with the mascot running to the TV](docs/assets/fotogramma-conversion-progress.png)
+
 ## Settings
 
 ![Settings window](docs/assets/fotogramma-settings.png)

@@ -31,6 +31,9 @@ cargo test --workspace
 # Update the four egui_kittest snapshots after an intentional layout change
 UPDATE_SNAPSHOTS=1 cargo test -p fotogramma snapshot
 
+# Regenerate the README screenshots in docs/assets (English, a demo library of Blender's open movies, never real files)
+cargo test -p fotogramma readme_screenshots -- --ignored
+
 # Minimal FFmpeg (macOS/Linux), then package and enforce the size budget
 deployment/ffmpeg/build_minimal.sh
 python3 deployment/build_rust.py

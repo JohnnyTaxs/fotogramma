@@ -3007,4 +3007,218 @@ mod small_snapshot_tests {
         assert_eq!(dialog.preset, "slow");
         assert_ne!(dialog.crf, 20);
     }
+
+    use fotogramma_core::scanner::Category;
+
+    /// A library of Blender's open movies, for the README screenshots: nothing
+    /// in them comes from a real library.
+    fn readme_app(cc: &mut eframe::CreationContext<'_>) -> FotogrammaApp {
+        fn video(
+            name: &str,
+            folder: &str,
+            codec: &str,
+            category: Category,
+            (width, height): (u32, u32),
+            minutes_seconds: (u32, u32),
+            megabytes: u64,
+        ) -> VideoInfo {
+            VideoInfo {
+                hdr: false,
+                path: PathBuf::from(format!("/Media/Movies/{folder}/{name}")),
+                relative_path: format!("{folder}/{name}"),
+                name: name.to_string(),
+                folder: folder.to_string(),
+                extension: name.rsplit('.').next().unwrap_or("mkv").to_string(),
+                category,
+                codec: Some(codec.to_string()),
+                size: Some(megabytes * 1_000_000),
+                duration: Some(f64::from(minutes_seconds.0 * 60 + minutes_seconds.1)),
+                width: Some(width),
+                height: Some(height),
+                error: None,
+            }
+        }
+        let mut app = FotogrammaApp::new(cc);
+        app.directory = "/Media/Movies".to_string();
+        app.settings.directory = "/Media/Movies".to_string();
+        app.videos = vec![
+            video(
+                "Sintel (2010).mkv",
+                "Sintel (2010)",
+                "h264",
+                Category::Convert,
+                (1920, 818),
+                (14, 48),
+                2_140,
+            ),
+            video(
+                "Tears of Steel (2012).mkv",
+                "Tears of Steel (2012)",
+                "h264",
+                Category::Convert,
+                (1920, 800),
+                (12, 14),
+                3_480,
+            ),
+            video(
+                "Big Buck Bunny (2008).mp4",
+                "Big Buck Bunny (2008)",
+                "h264",
+                Category::Convert,
+                (1920, 1080),
+                (9, 56),
+                690,
+            ),
+            video(
+                "Elephants Dream (2006).avi",
+                "Elephants Dream (2006)",
+                "mpeg4",
+                Category::Convert,
+                (1920, 1080),
+                (10, 54),
+                1_320,
+            ),
+            video(
+                "Cosmos Laundromat (2015).mkv",
+                "Cosmos Laundromat (2015)",
+                "hevc",
+                Category::Compatible,
+                (1920, 1080),
+                (12, 10),
+                780,
+            ),
+            video(
+                "Spring (2019).mkv",
+                "Spring (2019)",
+                "av1",
+                Category::Compatible,
+                (3840, 2160),
+                (7, 44),
+                1_050,
+            ),
+            video(
+                "Agent 327 (2017).mkv",
+                "Agent 327 (2017)",
+                "hevc",
+                Category::Compatible,
+                (1920, 1080),
+                (3, 51),
+                210,
+            ),
+            video(
+                "Coffee Run (2020).mp4",
+                "Coffee Run (2020)",
+                "h264",
+                Category::Convert,
+                (1920, 1080),
+                (3, 4),
+                410,
+            ),
+            video(
+                "Hero (2018).mkv",
+                "Hero (2018)",
+                "av1",
+                Category::Compatible,
+                (1920, 1080),
+                (3, 27),
+                190,
+            ),
+        ];
+        app.summary = summarize(&app.videos, None);
+        app.page = Page::Results;
+        app.filter = FilterCategory::All;
+        app.scan_completed_once = true;
+        // Screenshots are in English whatever the machine speaks.
+        app.settings.language = "en".to_string();
+        app.apply_settings();
+        app
+    }
+
+    /// Regenerates the screenshots of the README, in English:
+    /// `cargo test -p fotogramma readme_screenshots -- --ignored`
+    #[test]
+    #[ignore]
+    fn readme_screenshots() {
+        let _lang = lang_guard();
+        set_lang(Lang::En);
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/assets");
+        let shot = |name: &str, mut harness: egui_kittest::Harness<'_, FotogrammaApp>| {
+            harness.run();
+            for _ in 0..4 {
+                harness.step();
+            }
+            harness
+                .render()
+                .expect("render")
+                .save(out.join(name))
+                .expect("save");
+        };
+        let builder = || egui_kittest::Harness::builder().with_size(egui::vec2(1280.0, 820.0));
+
+        let pick = |app: &mut FotogrammaApp| {
+            for name in ["Sintel (2010)", "Tears of Steel (2012)"] {
+                app.selected
+                    .insert(PathBuf::from(format!("/Media/Movies/{name}/{name}.mkv")));
+            }
+        };
+        // A little taller, so every row of this one is whole.
+        shot(
+            "fotogramma-native-results.png",
+            egui_kittest::Harness::builder()
+                .with_size(egui::vec2(1280.0, 880.0))
+                .build_eframe(|cc| {
+                    let mut app = readme_app(cc);
+                    app.filter = FilterCategory::Convert;
+                    pick(&mut app);
+                    app
+                }),
+        );
+
+        shot(
+            "fotogramma-conversion-dialog.png",
+            builder().build_eframe(|cc| {
+                let mut app = readme_app(cc);
+                app.settings.default_profile = "high_quality".to_string();
+                pick(&mut app);
+                let selected = app.selected_videos();
+                app.conversion_dialog = Some(ConversionDialog::new(selected, &app.settings));
+                app
+            }),
+        );
+
+        shot(
+            "fotogramma-settings.png",
+            builder().build_eframe(|cc| {
+                let mut app = readme_app(cc);
+                app.settings.update_choice_made = true;
+                app.show_settings = true;
+                app
+            }),
+        );
+
+        shot(
+            "fotogramma-conversion-progress.png",
+            builder().build_eframe(|cc| {
+                let mut app = readme_app(cc);
+                let videos: Vec<VideoInfo> = app
+                    .videos
+                    .iter()
+                    .filter(|video| video.category == Category::Convert)
+                    .take(3)
+                    .cloned()
+                    .collect();
+                let _sender = running_session(&mut app, videos);
+                let session = app.session.as_mut().unwrap();
+                session.percent = 63;
+                session.label =
+                    "2 / 3 · Tears of Steel (2012).mkv · 63% · about 38 min left".to_string();
+                session.log = vec![
+                    "Start: /Media/Movies/Sintel (2010)/Sintel (2010).mkv\nOutput: /Media/Movies/Sintel (2010)/Fotogramma-H265/Sintel (2010).h265.mkv".to_string(),
+                    "Completed ✓ · /Media/Movies/Sintel (2010)/Fotogramma-H265/Sintel (2010).h265.mkv · 2.1 GB instead of 4.9 GB (-57%)".to_string(),
+                    "Start: /Media/Movies/Tears of Steel (2012)/Tears of Steel (2012).mkv\nOutput: /Media/Movies/Tears of Steel (2012)/Fotogramma-H265/Tears of Steel (2012).h265.mkv".to_string(),
+                ];
+                app
+            }),
+        );
+    }
 }
