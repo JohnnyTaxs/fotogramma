@@ -1966,6 +1966,18 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
                         .labelled_by(content_widget.id);
                     ui.end_row();
                 });
+            // What the default profile is, and how the profiles compare.
+            if let Some(profile) = builtin_profile(&settings.default_profile) {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(profile.description)
+                            .small()
+                            .color(theme::MUTED),
+                    )
+                    .wrap(),
+                );
+            }
+            profile_comparison(ui);
 
             ui.add_space(4.0);
             let output_label = ui.label(tr_str(

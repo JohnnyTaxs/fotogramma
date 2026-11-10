@@ -48,21 +48,21 @@ Fotogramma is the one that shows you the library first (what is not H.265, how m
 - Full-output validation before replacing an original file.
 - **Done stays done.** After a conversion, a video whose original was replaced moves to the compatible ones; one converted into a new file stays in the list but is marked **Already converted** (hover for the output path), and *Select all* and *Export* skip it so it is not converted twice by accident.
 - **Made for big libraries:** a scan cache (a rescan reads only the files that changed), up to 8 `ffprobe` threads, a **Bitrate** column to sort by what has the most to gain, and CSV or JSON export.
-- **Keeps long jobs safe:** the queue is saved while it runs and can be resumed after a crash, paused, ordered (largest or smallest first), and followed by sleep or shutdown; the computer is kept awake meanwhile.
+- **Keeps long jobs safe:** the queue is saved while it runs and can be resumed after a crash, paused, ordered (largest or smallest first), and followed by sleep or shutdown; the computer is kept awake meanwhile. Stopping it says so ("Conversion stopped"), and the file you stopped is not counted as an error.
 - **Smarter conversions:** subtitles that do not fit MP4 send the file to MKV, HDR sources are never processed in 8 bits, results that save too little are dropped, converted files keep the date of the original, and the progress shows the time left.
 - **A normal application menu:** on macOS the native menu bar (Fotogramma, File, Edit, View, Window, Help), on Windows and Linux a menu bar in the window, with the same entries and shortcuts: `Ctrl/Cmd+O` choose a folder, `R` scan, `E` export, `Enter` convert the selection, `Shift+A` select all to convert, `F` search, `1`–`4` filters, `,` settings, `W` close the window, `Q` quit. Entries are greyed out when they cannot work.
 - **Conversion in the background:** the progress window can be minimized to a bar at the bottom, and while it runs you can choose more videos and add them to the queue (they run one batch after the other, never in parallel). Stop ends the whole queue.
-- **Early stop and advice:** a file that is clearly heading for a result larger than the original (or than the minimum saving allows) is stopped after the first 10% instead of hours later, and the original is kept; the conversion window also suggests a CRF from how compressed the selected files already are.
+- **Early stop and advice:** a file that is clearly heading for a result larger than the original (or than the minimum saving allows) is stopped after the first 10% instead of hours later, and the original is kept. The conversion window also suggests a CRF from how compressed the selected files already are (a remux that is already at 5 Mb/s needs a higher CRF than a huge one), with a button to apply it, and a **Which profile to choose?** table with the time, file size and use of each profile.
 - **A little easter egg:** a chibi girl runs along the progress bar towards a switched-off TV. She never gets there while the conversion runs (not even at 100% of a file); when it has really finished she reaches it and the TV turns on. She is original pixel art drawn in code by `deployment/make_mascot.py`, and can be switched off in Settings.
 - **Your own presets:** save the custom profile under a name.
 - **Japanese and Korean file names** are drawn with a system font when a scan finds them.
 - **Command line:** `fotogramma-cli scan <folder>` lists what is left to convert, with no window.
 - **Space saved:** each converted file shows its new size against the old one, and the end of a conversion reports the total space freed (or used, if a file grew).
 - **Content type:** anime or live action (films and series). Anime gets `-tune animation`; "Automatic" reads the folders of the path (`Anime`, `Film`, `Serie TV`, `Movies`…), in English and Italian.
-- **Self-update:** the first time you start the app it asks whether it may check GitHub for updates at startup; nothing is requested until you say yes. If it finds a newer version it shows the release notes and installs it after verifying its checksum.
+- **Self-update, only if you say so:** the first time you start the app it asks whether it may check GitHub for updates at startup; nothing is requested until you say yes. If it finds a newer version it shows the release notes and installs it after verifying its checksum. **Check for Updates…** in the menu answers with a card: a spinner, then "You are up to date" (or why it failed).
 - **English and Italian**, chosen automatically from the system language, with an optional manual override.
-- **Settings** window: choose which codecs count as already compatible (the home page, statistics, and table update at once, no new scan) and the conversion defaults (replace original, profile, container).
-- Original application icon and Cinema Pop theme.
+- **Settings** window: choose the language, which codecs count as already compatible (the home page, statistics, and table update at once, no new scan), the conversion defaults (replace original, profile, container, content type, output folder, minimum saving), the early stop, the mascot, the scan cache and the update check.
+- Original application icon, Cinema Pop theme, and a window that scrolls instead of cutting its content when it is small.
 - No videos are modified during inspection. No media or metadata is uploaded during scanning or conversion.
 
 ![Conversion in progress, with the mascot running to the TV](docs/assets/fotogramma-conversion-progress.png)
@@ -78,14 +78,16 @@ Open **Settings** (*Impostazioni* in Italian) from the header. Changes apply imm
 - **Content type:** automatic (from the path), anime, or films and series, used as the default in the conversion dialog.
 - **Default output folder:** where converted files go. Empty means a `Fotogramma-H265` folder next to the originals.
 - **Replace the original by default:** pre-selects the verified replacement in the conversion dialog.
-- **Profile and container:** the preset and `mkv`/`mp4` pre-selected for new conversions.
+- **Profile and container:** the preset and `mkv`/`mp4` pre-selected for new conversions. Under them the profile is described, with the **Which profile to choose?** comparison.
 - **Keep the computer awake during conversions** (on by default) and a **default minimum saving**: when the new file saves less than that percentage, the original is kept and the result dropped.
+- **Stop files that would end up larger than the original** (on by default): after the first 10% of a file the size written so far gives a projection; if it is clearly too big, that file is stopped and the original kept.
+- **The mascot** on the progress bar (on by default).
 - **Remember results for faster scans:** the scan cache, with a button to clear it.
-- **Updates:** check at startup, or now.
+- **Updates:** check at startup (off until you agree to it at the first start), or check now.
 
 ## Conversion presets
 
-The **Custom** profile can be saved under a name (up to 40 characters) and appears in the profile menu from then on; saving under an existing name replaces it. The dialog also has **Order** (as listed, largest first for the most to gain, or smallest first for quick results), **Minimum saving**, and **When finished** (do nothing, sleep, or shut down after a 60-second countdown you can cancel). While a queue runs you can **pause after the file in progress**; if the app or the computer stops, the next start offers to resume what is left.
+The **Custom** profile can be saved under a name (up to 40 characters) and appears in the profile menu from then on; saving under an existing name replaces it. The dialog describes the chosen profile and has a **Which profile to choose?** comparison, and an **Advice for these files** box that suggests a CRF from the bitrate and the resolution of the selection, with a button to apply it. It also has **Order** (as listed, largest first for the most to gain, or smallest first for quick results), **Minimum saving** with the early stop (**Stop files that would end up larger than the original**), and **When finished** (do nothing, sleep, or shut down after a 60-second countdown you can cancel). While a queue runs you can **pause after the file in progress** or **minimize it to the background** and add more batches to the queue (the button then reads **Add to the queue**); if the app or the computer stops, the next start offers to resume what is left.
 
 ![Conversion dialog](docs/assets/fotogramma-conversion-dialog.png)
 
@@ -143,6 +145,7 @@ These are choices, not oversights:
 - **One conversion at a time.** (A queue can be paused, resumed and run in the background, with more batches added behind it, but it never runs in parallel.) The queue is sequential on purpose: x265 already uses every core, and parallel jobs only saturate the CPU and the disk.
 - **Only the first video stream is analyzed** (`v:0`) of `.mp4`, `.mkv`, and `.webm`. A file with several video streams is classified by its first one; the conversion itself keeps every stream (`-map 0`).
 - **Replacing an original does not work with WebM.** The WebM container only allows VP8, VP9 and AV1 video, so an HEVC result cannot stay a `.webm`: it has to become `.mkv` or `.mp4`. Replacing means swapping the verified result into the original's exact path with a backup, and a different extension would break that guarantee. WebM files can still be converted: the result is a new `.mkv` or `.mp4` next to them, and the original is left alone.
+- **Only the batch that is running is saved for a resume.** Batches waiting behind it in the background queue are lost if the app closes (it warns you first).
 - **No macOS notarization.** The app is ad-hoc signed but not notarized (that needs a paid Apple developer account), so Gatekeeper asks you to confirm the first launch.
 - **No macOS Intel build,** and the interface is available in Italian and English only.
 
@@ -176,7 +179,7 @@ If you agreed to it at the first start (or in Settings), Fotogramma asks GitHub 
 2. refuses it unless its SHA-256 matches `SHA256SUMS.txt`, published with every release (and, on macOS, unless the code signature is valid);
 3. after you quit, swaps the installed copy for the new one, keeps the old one if anything fails, and starts the new version.
 
-It needs write access to the folder that holds the app; otherwise the window shows the release page to download by hand. A copy started with `cargo run` is never replaced. **Settings → Updates** turns the startup check off or checks right away, and `FOTOGRAMMA_NO_UPDATE_CHECK=1` disables it for a single run. Releases up to 2.3.0 have no updater and no checksums: install 2.4.0 by hand once.
+It needs write access to the folder that holds the app; otherwise the window shows the release page to download by hand. A copy started with `cargo run` is never replaced. **Settings → Updates** turns the startup check on or off, or checks right away, and `FOTOGRAMMA_NO_UPDATE_CHECK=1` disables it for a single run. Releases up to 2.3.0 have no updater and no checksums: install 2.4.0 by hand once.
 
 ## Run from source
 
@@ -210,7 +213,7 @@ The application looks for the media tools in the executable folder, `bin/` besid
 3. Use statistics and filters to narrow down candidates.
 4. Select one or more videos to reveal available actions, or click **Select all** to take every convertible video in the current view (the filter and the search narrow it; the button then turns into **Clear selection**).
 5. Click a column header to sort and double-click a video for details.
-6. Convert directly or export the list for another tool.
+6. Convert directly (and, while it runs, minimize it and queue more) or export the list for another tool.
 7. Adjust the language, the accepted codecs, and the conversion defaults in **Settings** (*Impostazioni*).
 
 The last directory, window size, and your settings are saved in `settings.toml` under the platform configuration folder. Two other files live there: `scan-cache.json`, the cache of probe results (path, size, date, codec, resolution, duration of readable videos; turn it off or clear it in Settings), and `queue.json`, which exists only while a conversion queue runs. Nothing else about your library is stored.
@@ -222,7 +225,9 @@ cargo test --workspace
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-The suite covers discovery, probing, classification, presets, FFmpeg arguments, output allocation, duration/stream/full-decode validation, atomic replacement and backup restoration, settings, the virtualized table, codec re-classification, language selection and English output, update parsing, checksums, extraction and the swap helper, and four `egui_kittest` snapshots (main window and conversion dialog at 1280×820 and 1050×680).
+The suite covers discovery, probing, classification, presets, FFmpeg arguments, output allocation, duration/stream/full-decode validation, atomic replacement and backup restoration, settings, the virtualized table, codec re-classification, language selection and English output, update parsing, checksums, extraction and the swap helper, the menu, the mascot, the early stop and the advice, and `egui_kittest` snapshots of the main window and the dialogs at 1280×820 and 1050×680.
+
+The screenshots above are regenerated, in English and from a demo library of Blender's open movies, with `cargo test -p fotogramma readme_screenshots -- --ignored`.
 
 Two optional end-to-end tests convert a generated clip and verify atomic replacement with real FFmpeg binaries. They use the system tools by default, or the packaged minimal tools when `FOTOGRAMMA_FFMPEG_DIR` is set:
 
@@ -259,7 +264,7 @@ crates/core/               UI-free engine
   src/media_tools.rs       ffmpeg/ffprobe resolution and DYLD environment
   src/conversion.rs        Presets, FFmpeg arguments, safe output allocation
   src/verification.rs      Full validation and atomic backup replacement
-  src/update.rs            Release check, verified download, swap helper (only network use)
+  src/update.rs            Release check, verified download, swap helper (only network use, opt-in)
   src/cache.rs             Scan cache (path, size, date)
   src/queue.rs             The running queue, saved so it can be resumed
   src/export.rs            Paths, CSV and JSON lists; bitrate
@@ -267,8 +272,12 @@ crates/core/               UI-free engine
   src/bin/fotogramma-cli.rs  Command line tool
   src/formatting.rs        Italian number and size formatting
 crates/app/                egui/eframe application
-  src/app.rs               Window, layout, scan flow, snapshots
-  src/icon.rs              Application and Dock icon at startup
+  src/app.rs               Window, layout, scan flow, queue, snapshots
+  src/menu.rs              The application menu, defined once (actions, shortcuts, when enabled)
+  src/native_menu.rs       The macOS menu bar, built with muda
+  src/mascot.rs            The easter egg on the progress bar
+  src/markdown.rs          Release notes rendering
+  src/icon.rs              Application and window icon at startup
   src/table.rs             Virtualized table, filters, sorting, selection
   src/dialogs.rs           Preferences, conversion settings, progress, details, confirmations
   src/worker.rs            Scan and conversion threads with channels
@@ -280,6 +289,8 @@ deployment/
   dmg/                     macOS disk image background and its generator
   build_rust.py            Packaging, ZIP, signature round-trip, size budget
   create_release.py        GitHub release uploader
+  make_icons.py            Rebuilds the icons from Fotogramma.png
+  make_mascot.py           Draws the mascot and the TV (original pixel art)
   Fotogramma.icns/.ico/.png
 docs/                      Architecture, CI/CD, demo assets, release notes
 static/fonts/              Embedded fonts and their licenses
@@ -303,7 +314,7 @@ This is a personal project, so there is no support promise, but bug reports are 
 
 ## Privacy and license
 
-The app opens no server and no browser, and your videos and library are never uploaded. The only network request is the update check: one HTTPS request to `api.github.com` at startup (it reveals your IP address and the app version, like any download), which you can turn off in Settings. Scanning and conversion run locally with the bundled FFmpeg.
+The app opens no server and no browser, and your videos and library are never uploaded. The only network request is the update check, and it is **opt-in**: the first start asks, and nothing is requested until you say yes. If you do, it is one HTTPS request to `api.github.com` at startup (it reveals your IP address and the app version, like any download), which you can turn off in Settings. Scanning and conversion run locally with the bundled FFmpeg.
 
 Fotogramma itself is released under the **MIT License**. See [`LICENSE`](LICENSE) for the full text, including the warranty disclaimer.
 

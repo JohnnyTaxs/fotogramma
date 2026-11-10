@@ -77,6 +77,14 @@ Self-update, the only code that touches the network. `check` reads the latest Gi
 
 The window in `dialogs.rs` shows the release notes, then *Update and restart*, *Later* or *Skip this version* (stored in `settings.toml`). The restart is held back while a scan or conversion runs.
 
+### Early stop and advice (in `conversion.rs`)
+
+`heading_for_too_big(original, current, fraction, min_saving)` projects the final size from the bytes written so far. It says nothing in the first 10% of a file and allows a margin of 10% over the limit (the original, reduced by the minimum saving), because CRF output varies from scene to scene. `worker::convert_one` calls it on every progress line when the option is on (default), kills the `ffmpeg` child, removes the partial output and reports the file as skipped with the projected size, keeping the original. `recommend_quality(videos)` turns the average bits per pixel per second of a selection into a CRF suggestion (old codecs 22, then 26, 24, 22 and 20 as the bitrate grows); the conversion dialog shows it with a button that switches to a custom profile. The profile copy that the combo uses is taken after that button runs, or the old profile would be put back in the same frame.
+
+### Background queue and the mascot (`app.rs`, `dialogs.rs`, `mascot.rs`)
+
+The progress window can be minimized (`session_minimized`) to a bar at the bottom (`show_background_bar`). While a session exists, the conversion dialog adds its batch to `FotogrammaApp::waiting` (button "Add to the queue"); `advance_queue` starts the next batch when the running one finishes and drops them all if the user stopped it. `ConversionSession::scene()` tells the mascot what to do: she runs along the bar (never past 90% of the way), stands when paused or stopped, and when the session finished for good dashes to the TV, which turns on. `ConversionSession::stopped()` separates a stop from a completion for the title and the summary. The frames come from `deployment/mascot.png` and `deployment/tv.png`, drawn by `deployment/make_mascot.py`.
+
 ### Content type (in `conversion.rs`)
 
 `MediaKind` is `Anime` or `Live`. `detect_kind(path)` tokenizes the folder names above a file (lowercase, split on non-alphanumerics) and returns `Anime` if any token is an anime word, else `Live` if any is a film/series word; `detect_selection` requires the files of a selection to agree. The dialog (`ConversionDialog::effective_kind`) combines the setting (`auto`, `anime`, `live`) with the detection and applies only the x265 tune: `animation` for anime, none for live action. The audio choice is merged into built-in profiles in `current_profile`, so every preset honours it.
