@@ -21,10 +21,11 @@ const SCALE: f32 = 0.75;
 const GIRL_W: f32 = 40.0 * SCALE;
 pub const GIRL_H: f32 = 48.0 * SCALE;
 const TV_SIZE: f32 = 40.0 * SCALE;
+/// The gap between the end of the bar and the TV: wide enough for her to stand
+/// at the end of the bar (her centre on the head of the fill) without touching it.
+const TV_GAP: f32 = GIRL_W * 0.6;
 /// The room the TV takes at the end of the bar.
-pub const TV_ROOM: f32 = TV_SIZE + 4.0;
-/// How far along the way she can get while the conversion is still running.
-const ONLY_THIS_FAR: f32 = 0.90;
+pub const TV_ROOM: f32 = TV_SIZE + TV_GAP;
 /// Seconds she needs for the last dash once the conversion has finished.
 const DASH_SECONDS: f64 = 0.7;
 
@@ -61,17 +62,19 @@ pub struct Geometry {
 impl Geometry {
     pub fn new(bar: Rect) -> Self {
         let tv = Rect::from_min_size(
-            pos2(bar.right() + 4.0, bar.bottom() + 2.0 - TV_SIZE),
+            pos2(bar.right() + TV_GAP, bar.bottom() + 2.0 - TV_SIZE),
             vec2(TV_SIZE, TV_SIZE),
         );
         Self { bar, tv }
     }
 
-    /// Left edge of her sprite while the conversion runs: never beyond
-    /// `ONLY_THIS_FAR` of the way, whatever the percentage says.
+    /// Left edge of her sprite while the conversion runs: her centre is on the
+    /// head of the bar's fill, so she is always on top of it (at the very start
+    /// she is a little ahead of it, not outside the bar). At the end of the bar
+    /// she is still short of the TV, which she only reaches when it is over.
     pub fn running_x(&self, fraction: f32) -> f32 {
-        self.bar.left()
-            + fraction.clamp(0.0, 1.0) * ONLY_THIS_FAR * (self.bar.width() - GIRL_W * 0.5)
+        (self.bar.left() + fraction.clamp(0.0, 1.0) * self.bar.width() - GIRL_W * 0.5)
+            .max(self.bar.left())
     }
 
     /// Where she ends up, right in front of the TV.
@@ -204,10 +207,26 @@ mod tests {
     fn while_it_runs_she_never_reaches_the_tv() {
         let g = Geometry::new(bar());
         let furthest = g.running_x(1.0);
-        assert!(furthest + GIRL_W < g.tv.left(), "even at 100% of the bar");
+        assert!(furthest + GIRL_W <= g.tv.left(), "even at 100% of the bar");
         assert!(furthest < g.arrival_x(), "the last dash is still to come");
         assert_eq!(g.running_x(0.0), 100.0);
         assert_eq!(g.running_x(9.0), furthest, "the fraction is clamped");
+    }
+
+    #[test]
+    fn she_is_always_on_top_of_the_head_of_the_fill() {
+        let g = Geometry::new(bar());
+        for step in 0..=20 {
+            let fraction = step as f32 / 20.0;
+            let head = g.bar.left() + fraction * g.bar.width();
+            let centre = g.running_x(fraction) + GIRL_W * 0.5;
+            // Never behind the fill by more than a pixel, never far ahead of it.
+            assert!(centre >= head - 1.0, "fraction {fraction}: she is behind");
+            assert!(
+                centre <= head + GIRL_W * 0.5 + 1.0,
+                "fraction {fraction}: she is far ahead"
+            );
+        }
     }
 
     #[test]

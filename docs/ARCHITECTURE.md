@@ -26,7 +26,7 @@ eframe + egui (glow / OpenGL)
 
 ## Workspace
 
-`Cargo.toml` defines a two-crate workspace, version `2.11.2`:
+`Cargo.toml` defines a two-crate workspace, version `2.11.3`:
 
 | Crate | Responsibility |
 | --- | --- |
@@ -83,7 +83,7 @@ The window in `dialogs.rs` shows the release notes, then *Update and restart*, *
 
 ### Background queue and the mascot (`app.rs`, `dialogs.rs`, `mascot.rs`)
 
-The progress window can be minimized (`session_minimized`) to a bar at the bottom (`show_background_bar`). While a session exists, the conversion dialog adds its batch to `FotogrammaApp::waiting` (button "Add to the queue"); `advance_queue` starts the next batch when the running one finishes and drops them all if the user stopped it. `ConversionSession::scene()` tells the mascot what to do: she runs along the bar (never past 90% of the way), stands when paused or stopped, and when the session finished for good dashes to the TV, which turns on. `ConversionSession::stopped()` separates a stop from a completion for the title and the summary. The frames come from `deployment/mascot.png` and `deployment/tv.png`, drawn by `deployment/make_mascot.py`.
+The progress window can be minimized (`session_minimized`) to a bar at the bottom (`show_background_bar`). While a session exists, the conversion dialog adds its batch to `FotogrammaApp::waiting` (button "Add to the queue"); `advance_queue` starts the next batch when the running one finishes and drops them all if the user stopped it. `ConversionSession::scene()` tells the mascot what to do: she runs along the bar with her centre on the head of the fill (and stops short of the TV), stands when paused or stopped, and when the session finished for good dashes to the TV, which turns on. `ConversionSession::stopped()` separates a stop from a completion for the title and the summary. The frames come from `deployment/mascot.png` and `deployment/tv.png`, drawn by `deployment/make_mascot.py`.
 
 ### Content type (in `conversion.rs`)
 
