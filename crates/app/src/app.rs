@@ -2977,4 +2977,34 @@ mod small_snapshot_tests {
         harness.run();
         harness.get_by_label("Conversione interrotta");
     }
+
+    #[test]
+    fn the_advised_settings_stay_applied() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.selected.insert(PathBuf::from("/Filmati/Tramonto.mkv"));
+                let selected = app.selected_videos();
+                let mut dialog = ConversionDialog::new(selected, &app.settings);
+                // Start from a built-in profile, as in the report.
+                dialog.profile_key = "max_quality".to_string();
+                dialog.crf = 20;
+                dialog.preset = "veryslow".to_string();
+                app.conversion_dialog = Some(dialog);
+                app
+            });
+        harness.run();
+        harness.get_by_label_contains("Usa CRF").click();
+        for _ in 0..5 {
+            harness.run();
+            harness.step();
+        }
+        let dialog = harness.state().conversion_dialog.as_ref().unwrap();
+        assert_eq!(dialog.profile_key, "custom", "the profile is not put back");
+        assert_eq!(dialog.preset, "slow");
+        assert_ne!(dialog.crf, 20);
+    }
 }

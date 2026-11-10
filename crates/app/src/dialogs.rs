@@ -399,8 +399,6 @@ impl ConversionDialog {
 
     /// The scrollable body: profile, destination, replacement, and command preview.
     fn form(&mut self, ui: &mut egui::Ui) {
-        let custom = self.profile_key == "custom";
-        let mut selected_profile = self.profile_key.clone();
         let description = if self.profile_key == "custom" {
             tr_str("Configura manualmente i parametri video. Audio e contenitore restano modificabili in ogni profilo.", "Configure the video parameters manually. Audio and container can be changed in every profile.").to_string()
         } else {
@@ -412,6 +410,10 @@ impl ConversionDialog {
         profile_comparison(ui);
         self.recommendation(ui);
         ui.add_space(6.0);
+        // Read only now: the advice above may just have switched the profile,
+        // and a copy taken before it would put the old profile back.
+        let custom = self.profile_key == "custom";
+        let mut selected_profile = self.profile_key.clone();
         egui::Grid::new("conversion-form")
             .num_columns(2)
             .spacing([18.0, 4.0])
