@@ -5,6 +5,7 @@ mod app;
 mod dialogs;
 mod icon;
 mod markdown;
+mod mascot;
 mod menu;
 #[cfg(target_os = "macos")]
 mod native_menu;

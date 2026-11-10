@@ -54,6 +54,9 @@ pub struct Settings {
     /// Interface language: `auto` (follow the system), `it` or `en`.
     #[serde(default = "default_language")]
     pub language: String,
+    /// A small character runs along the progress bar towards a TV.
+    #[serde(default = "default_true")]
+    pub mascot: bool,
     /// Ask GitHub for a newer release at startup. Off until the user agrees
     /// to it in the first-run question or in Settings.
     #[serde(default)]
@@ -117,6 +120,7 @@ impl Default for Settings {
             window_height: None,
             language: default_language(),
             check_updates: false,
+            mascot: true,
             update_choice_made: false,
             presets: Vec::new(),
             scan_cache: true,
@@ -192,6 +196,7 @@ mod tests {
             window_height: Some(820.0),
             language: "en".to_string(),
             check_updates: false,
+            mascot: false,
             update_choice_made: true,
             presets: vec![SavedPreset {
                 name: "Anime 1080p".to_string(),
@@ -253,6 +258,7 @@ mod tests {
             "no network request until the user agrees"
         );
         assert!(!parsed.update_choice_made);
+        assert!(parsed.mascot, "on unless switched off");
         assert!(parsed.prevent_sleep);
         assert!(parsed.scan_cache);
         assert!(parsed.presets.is_empty());

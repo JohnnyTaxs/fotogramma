@@ -101,6 +101,8 @@ pub struct FotogrammaApp {
     panel_bottom: f32,
     show_settings: bool,
     show_about: bool,
+    /// The easter egg that runs along the progress bar.
+    mascot: Option<crate::mascot::Mascot>,
     /// The answer to a manual update check, shown as a small card.
     update_notice: Option<dialogs::UpdateNotice>,
     /// The conversion runs in the background: a bar instead of a window.
@@ -186,6 +188,7 @@ impl FotogrammaApp {
             panel_bottom: 0.0,
             show_settings: false,
             show_about: false,
+            mascot: crate::mascot::Mascot::load(&cc.egui_ctx),
             update_notice: None,
             session_minimized: false,
             waiting: Vec::new(),
@@ -758,8 +761,9 @@ impl FotogrammaApp {
         let mut close_session = false;
         let waiting = self.waiting.len();
         let minimized = self.session_minimized;
+        let mascot = self.mascot.as_ref().filter(|_| self.settings.mascot);
         if let Some(session) = self.session.as_mut().filter(|_| !minimized) {
-            match dialogs::show_progress(ctx, session, waiting) {
+            match dialogs::show_progress(ctx, session, waiting, mascot) {
                 ProgressAction::Close => close_session = true,
                 ProgressAction::Minimize => self.session_minimized = true,
                 ProgressAction::OpenFolder => {
@@ -1706,6 +1710,7 @@ impl eframe::App for FotogrammaApp {
 
         if self.session.is_some() && self.session_minimized {
             let waiting = self.waiting.len();
+            let mascot = self.mascot.as_ref().filter(|_| self.settings.mascot);
             let mut bar = dialogs::BarAction::None;
             if let Some(session) = self.session.as_ref() {
                 egui::Panel::bottom("conversion-bar")
@@ -1716,7 +1721,7 @@ impl eframe::App for FotogrammaApp {
                             .inner_margin(egui::Margin::symmetric(24, 8)),
                     )
                     .show(ui, |ui| {
-                        bar = dialogs::show_background_bar(ui, session, waiting);
+                        bar = dialogs::show_background_bar(ui, session, waiting, mascot);
                     });
             }
             match bar {
@@ -2919,5 +2924,22 @@ mod small_snapshot_tests {
         sender.send(CheckMessage::UpToDate).unwrap();
         app.poll_update();
         assert!(app.update_notice.is_none());
+    }
+
+    #[test]
+    fn the_mascot_runs_on_the_progress_window_and_can_be_switched_off() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let app = harness.state_mut();
+        let _sender = running_session(app, Vec::new());
+        app.session.as_mut().unwrap().percent = 60;
+        app.session.as_mut().unwrap().label = "1 / 2 · Gita al lago.mp4 · 60%".to_string();
+        harness.run();
+        harness.snapshot("conversion-progress-mascot");
+        harness.state_mut().settings.mascot = false;
+        harness.run();
     }
 }

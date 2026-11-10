@@ -64,6 +64,7 @@ Linux and Windows build x265 with `deployment/ffmpeg/build_x265.sh` (8-bit + 10-
 | `crates/core/src/verification.rs` | Codec/duration/stream validation, full decode, and atomic backup replacement. |
 | `crates/app/src/app.rs` | Entry state, layout, selection, scan flow, smoke test, four snapshots. |
 | `crates/app/src/markdown.rs` | Renders the release notes (headings, lists, bold, italic, code). Text from the network is sanitized first. |
+| `crates/app/src/mascot.rs` | The easter egg on the progress bar: she runs towards a TV, which turns on only when the conversion has finished. Frames in `deployment/mascot.png` and `deployment/tv.png`, original art made by `deployment/make_mascot.py` (never bundle someone else's character). Switchable in Settings; tests fix the frame. |
 | `crates/app/src/icon.rs` | Apply the bundled icon to the macOS Dock at startup. |
 | `crates/app/src/table.rs` | Virtualized table, filters, sorting, selection, exact column widths. |
 | `crates/app/src/dialogs.rs` | Preferences window, conversion settings, command preview, progress, results, close confirmation. |

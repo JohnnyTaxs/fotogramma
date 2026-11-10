@@ -1238,6 +1238,23 @@ impl ConversionSession {
     pub fn is_running(&self) -> bool {
         !self.finished
     }
+
+    /// What the mascot should be doing.
+    pub fn scene(&self) -> crate::mascot::Scene {
+        use crate::mascot::Scene;
+        use std::sync::atomic::Ordering;
+        if !self.finished {
+            if self.pause.load(Ordering::Relaxed) {
+                Scene::Paused
+            } else {
+                Scene::Running
+            }
+        } else if self.failed || self.cancel.load(Ordering::Relaxed) {
+            Scene::Stopped
+        } else {
+            Scene::Done
+        }
+    }
 }
 
 pub enum ProgressAction {
@@ -1253,6 +1270,7 @@ pub fn show_progress(
     ctx: &egui::Context,
     session: &mut ConversionSession,
     waiting: usize,
+    mascot: Option<&crate::mascot::Mascot>,
 ) -> ProgressAction {
     let mut action = ProgressAction::None;
     let modal = egui::Modal::new(egui::Id::unique("conversion-progress"))
@@ -1316,11 +1334,22 @@ pub fn show_progress(
                 };
                 ui.label(RichText::new(text).strong().color(color));
             }
-            ui.add(
-                egui::ProgressBar::new(f32::from(session.percent) / 100.0)
-                    .desired_height(10.0)
-                    .fill(theme::CORAL),
-            );
+            match mascot {
+                Some(mascot) => mascot.progress(
+                    ui,
+                    ui.available_width(),
+                    f32::from(session.percent) / 100.0,
+                    session.scene(),
+                    theme::CORAL,
+                ),
+                None => {
+                    ui.add(
+                        egui::ProgressBar::new(f32::from(session.percent) / 100.0)
+                            .desired_height(10.0)
+                            .fill(theme::CORAL),
+                    );
+                }
+            }
             if session.replace_original && !session.finished {
                 ui.label(
                     RichText::new(tr_str(
@@ -1418,6 +1447,7 @@ pub fn show_background_bar(
     ui: &mut egui::Ui,
     session: &ConversionSession,
     waiting: usize,
+    mascot: Option<&crate::mascot::Mascot>,
 ) -> BarAction {
     let mut action = BarAction::None;
     ui.horizontal(|ui| {
@@ -1443,12 +1473,23 @@ pub fn show_background_bar(
             )
         };
         ui.label(RichText::new(title).small().strong().color(color));
-        ui.add(
-            egui::ProgressBar::new(f32::from(session.percent) / 100.0)
-                .desired_width(160.0)
-                .desired_height(8.0)
-                .fill(theme::CORAL),
-        );
+        match mascot {
+            Some(mascot) => mascot.progress(
+                ui,
+                160.0 + crate::mascot::TV_ROOM,
+                f32::from(session.percent) / 100.0,
+                session.scene(),
+                theme::CORAL,
+            ),
+            None => {
+                ui.add(
+                    egui::ProgressBar::new(f32::from(session.percent) / 100.0)
+                        .desired_width(160.0)
+                        .desired_height(8.0)
+                        .fill(theme::CORAL),
+                );
+            }
+        }
         ui.add(
             egui::Label::new(RichText::new(&session.label).small().color(theme::MUTED)).truncate(),
         );
@@ -1746,6 +1787,18 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
                 .small()
                 .color(theme::MUTED),
             );
+            if ui
+                .checkbox(
+                    &mut settings.mascot,
+                    tr_str(
+                        "Mostra la mascotte che corre verso la TV sulla barra di avanzamento",
+                        "Show the mascot running to the TV on the progress bar",
+                    ),
+                )
+                .changed()
+            {
+                changed = true;
+            }
             if ui
                 .checkbox(
                     &mut settings.stop_if_larger,
