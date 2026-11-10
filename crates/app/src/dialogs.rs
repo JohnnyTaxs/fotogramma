@@ -1186,12 +1186,29 @@ impl ConversionSession {
                     self.results = results;
                     let successes = self.results.iter().filter(|result| result.success).count();
                     let skipped = self.results.iter().filter(|result| result.skipped).count();
-                    let errors = self.results.len().saturating_sub(successes + skipped);
+                    let stopped = self.stopped();
+                    // A file the user stopped is not an error.
+                    let interrupted = self
+                        .results
+                        .iter()
+                        .filter(|result| result.cancelled)
+                        .count();
+                    let errors = self
+                        .results
+                        .len()
+                        .saturating_sub(successes + skipped + interrupted);
                     let replacements = self.results.iter().filter(|result| result.replaced).count();
-                    let mut summary = fotogramma_core::tr!(
-                        "Conversione terminata: riuscite {successes}, errori {errors}",
-                        "Conversion finished: {successes} succeeded, {errors} failed"
-                    );
+                    let mut summary = if stopped {
+                        fotogramma_core::tr!(
+                            "Conversione interrotta: riuscite {successes}, errori {errors}",
+                            "Conversion stopped: {successes} succeeded, {errors} failed"
+                        )
+                    } else {
+                        fotogramma_core::tr!(
+                            "Conversione terminata: riuscite {successes}, errori {errors}",
+                            "Conversion finished: {successes} succeeded, {errors} failed"
+                        )
+                    };
                     if skipped > 0 {
                         summary.push_str(&fotogramma_core::tr!(
                             " · scartati per risparmio troppo piccolo: {skipped}",
@@ -1205,7 +1222,10 @@ impl ConversionSession {
                         ));
                     }
                     self.label = summary;
-                    self.percent = 100;
+                    // Stopped: the bar stays where it was stopped.
+                    if !stopped {
+                        self.percent = 100;
+                    }
                     let mut space = SpaceChange::default();
                     for result in self.results.iter().filter(|result| result.success) {
                         if let (Some(before), Some(after)) = (result.original_size, result.new_size)
@@ -1229,6 +1249,11 @@ impl ConversionSession {
     pub fn cancel(&self) {
         self.cancel
             .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Ended because the user stopped it, not because it ran to the end.
+    pub fn stopped(&self) -> bool {
+        self.finished && !self.failed && self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn successes(&self) -> usize {
@@ -1279,6 +1304,8 @@ pub fn show_progress(
             ui.set_min_width(680.0);
             let heading = if session.failed {
                 tr_str("Conversione non riuscita", "Conversion failed")
+            } else if session.stopped() {
+                tr_str("Conversione interrotta", "Conversion stopped")
             } else if session.finished {
                 tr_str("Conversione completata", "Conversion completed")
             } else {
@@ -1455,6 +1482,11 @@ pub fn show_background_bar(
             (
                 tr_str("Conversione non riuscita", "Conversion failed"),
                 theme::ERROR,
+            )
+        } else if session.stopped() {
+            (
+                tr_str("Conversione interrotta", "Conversion stopped"),
+                theme::CORAL_HOVER,
             )
         } else if session.finished {
             (

@@ -2942,4 +2942,39 @@ mod small_snapshot_tests {
         harness.state_mut().settings.mascot = false;
         harness.run();
     }
+
+    #[test]
+    fn a_stopped_conversion_is_said_to_be_stopped_not_completed() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let app = harness.state_mut();
+        let sender = running_session(app, Vec::new());
+        {
+            let session = app.session.as_ref().unwrap();
+            session.cancel.store(true, Ordering::Relaxed);
+        }
+        let mut result = done("Tramonto.mkv", false);
+        result.cancelled = true;
+        result.success = false;
+        sender
+            .send(crate::worker::ConversionMessage::Completed(vec![result]))
+            .unwrap();
+        app.session.as_mut().unwrap().poll();
+        let session = app.session.as_ref().unwrap();
+        assert!(session.stopped());
+        assert!(session.percent < 100, "the bar stays where it was stopped");
+        assert!(session.label.contains("interrotta"), "{}", session.label);
+        assert!(
+            session.label.contains("errori 0"),
+            "a stop is not an error: {}",
+            session.label
+        );
+        assert_eq!(session.scene(), crate::mascot::Scene::Stopped);
+        harness.run();
+        harness.get_by_label("Conversione interrotta");
+    }
 }
