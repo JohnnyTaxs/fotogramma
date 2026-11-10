@@ -44,10 +44,6 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 git diff --check
 ```
 
-Windows builds use `deployment/ffmpeg/build_minimal_windows.sh` inside MSYS2 MINGW64. Never substitute the full Homebrew/community FFmpeg archive: it breaks the size budget.
-
-Linux and Windows build x265 with `deployment/ffmpeg/build_x265.sh` (8-bit + 10-bit only, static C++ runtime) instead of installing the distribution package; macOS uses Homebrew's arm64 x265.
-
 ## Architecture
 
 | File | Rules |
@@ -100,27 +96,9 @@ The table uses `egui_extras::TableBuilder` with virtualized rows, native sorting
 - `Visuals::strong_text_color()` reuses `widgets.active.fg_stroke`; keep it light or `.strong()` text becomes invisible.
 - The conversion modal must fit 1050×680: capped width, scrollable body, pinned action row.
 
-## Build and assets
+## Build, CI and releases
 
-- `deployment/ffmpeg/build_minimal.sh` and `build_minimal_windows.sh` define the only supported FFmpeg component list. Adding a codec or filter must be justified by a real app path and re-measured against the budget.
-- `deployment/ffmpeg/collect_macos.py` rewrites install names to `@loader_path`, re-signs every Mach-O file, and verifies relocation.
-- `deployment/ffmpeg/collect_linux.py` sets an `$ORIGIN/../lib` runpath with `patchelf`.
-- macOS archives use `ditto -c -k --sequesterRsrc --keepParent`; `deployment/build_rust.py` extracts the ZIP again and runs `codesign --verify --deep --strict` before publishing.
-- The macOS `Info.plist` embeds the version from `Cargo.toml`.
-- Windows embeds the icon and version through `rust/crates/app/build.rs` (`winresource`).
-- Do not commit `target/`, `build/`, `dist/`, `deployment/vendor/`, or screenshots containing real user data.
-
-## CI/CD and releases
-
-`.github/workflows/build-release.yml` runs on Linux, Windows, and macOS ARM:
-
-- builds the minimal FFmpeg on each platform;
-- runs `cargo test --workspace --locked`;
-- reruns the real pipeline tests against the freshly built tools;
-- packages with `deployment/build_rust.py` and enforces the size budget;
-- on a `v*` tag, publishes through `deployment/create_release.py`.
-
-The minimal FFmpeg of Linux and Windows is cached on the hash of `deployment/ffmpeg/**`: change a script there and the next run rebuilds it. Third-party actions are pinned to a commit SHA (Dependabot updates them) and the workflow token is read-only except in the release job. Do not add macOS Intel or Forgejo-specific runner configuration. Never print `GITHUB_TOKEN` or `FORGEJO_TOKEN`. Release tags follow SemVer (`v2.0.0`).
+Before touching `deployment/`, `.github/workflows/`, packaging, or a release, load the `release-packaging` skill (`.agents/skills/release-packaging/SKILL.md`): the FFmpeg component list, per-OS collection and signing, and the CI and release rules live there. Do not commit `target/`, `build/`, `dist/`, `deployment/vendor/`, or screenshots containing real user data.
 
 ## Checklist
 
@@ -131,5 +109,5 @@ The minimal FFmpeg of Linux and Windows is cached on the hash of `deployment/ffm
 5. A short H.264 is converted and verified as `hevc` without modifying the original; replacement is tested with a temporary copy.
 6. The moved macOS bundle starts with `PATH=/usr/bin:/bin`, scans, converts, and shuts down.
 7. `cargo fmt --check`, `cargo check --workspace`, `cargo clippy ... -D warnings`, and `git diff --check` pass.
-8. README, `docs/`, and this guide are updated if architecture or commands change.
+8. README, `docs/`, this guide, and the `release-packaging` skill are updated if architecture, commands, or packaging change.
 9. The size budget passes; report the measured app and ZIP sizes.
