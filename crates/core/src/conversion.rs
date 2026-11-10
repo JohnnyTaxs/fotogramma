@@ -411,6 +411,130 @@ pub fn allocate_partial_path(source: &Path) -> Result<PathBuf, String> {
     Ok(candidate)
 }
 
+/// How much of the way a conversion has to be before its size says anything.
+pub const EARLY_STOP_FROM: f64 = 0.10;
+
+/// Whether a conversion at `fraction` (0..1) of the video, with `current`
+/// bytes written, is heading for a file that will not save at least
+/// `min_saving_percent` of the `original`. Returns the projected size.
+/// CRF output varies from scene to scene, so a margin of 10% is allowed
+/// before it speaks, and nothing is judged in the first 10%.
+pub fn heading_for_too_big(
+    original: u64,
+    current: u64,
+    fraction: f64,
+    min_saving_percent: u8,
+) -> Option<u64> {
+    if fraction < EARLY_STOP_FROM || original == 0 || current == 0 {
+        return None;
+    }
+    let projected = current as f64 / fraction.min(1.0);
+    let limit = original as f64 * (100.0 - f64::from(min_saving_percent)) / 100.0;
+    (projected > limit * 1.10).then_some(projected.round() as u64)
+}
+
+/// A quality suggestion for the files about to be converted, from how much
+/// they are already compressed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Recommendation {
+    pub crf: u8,
+    pub text: String,
+}
+
+/// Codecs much less efficient than H.265: they shrink a lot at any quality.
+fn is_old_codec(codec: &str) -> bool {
+    matches!(
+        codec,
+        "mpeg1video"
+            | "mpeg2video"
+            | "mpeg4"
+            | "msmpeg4v1"
+            | "msmpeg4v2"
+            | "msmpeg4v3"
+            | "h263"
+            | "vc1"
+            | "wmv1"
+            | "wmv2"
+            | "wmv3"
+            | "mjpeg"
+            | "rv40"
+            | "theora"
+    )
+}
+
+/// `None` when nothing is known about the bitrate. The measure is the
+/// average bits per pixel per second, so it needs no frame rate.
+pub fn recommend_quality(videos: &[crate::scanner::VideoInfo]) -> Option<Recommendation> {
+    let mut measures = Vec::new();
+    let mut old = 0;
+    for video in videos {
+        let (Some(size), Some(duration), Some(width), Some(height)) =
+            (video.size, video.duration, video.width, video.height)
+        else {
+            continue;
+        };
+        if duration <= 0.0 || width == 0 || height == 0 {
+            continue;
+        }
+        if video.codec.as_deref().is_some_and(is_old_codec) {
+            old += 1;
+        }
+        measures.push(size as f64 * 8.0 / duration / (f64::from(width) * f64::from(height)));
+    }
+    if measures.is_empty() {
+        return None;
+    }
+    let average = measures.iter().sum::<f64>() / measures.len() as f64;
+    let all_old = old == measures.len();
+    let (crf, text) = if all_old {
+        (
+            22,
+            tr_str(
+                "Codec datato (MPEG-2, MPEG-4, WMV…): x265 comprime molto meglio, anche a qualità alta. CRF 22 con preset slow dovrebbe far risparmiare parecchio.",
+                "An old codec (MPEG-2, MPEG-4, WMV…): x265 compresses much better, even at high quality. CRF 22 with the slow preset should save a lot.",
+            )
+            .to_string(),
+        )
+    } else if average < 1.5 {
+        (
+            26,
+            tr_str(
+                "Già molto compresso (bitrate basso per la risoluzione): c'è poco da guadagnare. Con CRF 26 il file potrebbe ridursi di poco; a un CRF più basso diventerebbe più grande dell'originale. Valuta di lasciarlo com'è.",
+                "Already heavily compressed (low bitrate for the resolution): there is little to gain. At CRF 26 the file may shrink only a little; at a lower CRF it would grow beyond the original. Consider leaving it as it is.",
+            )
+            .to_string(),
+        )
+    } else if average < 2.6 {
+        (
+            24,
+            tr_str(
+                "Già ben compresso: un CRF basso (20-22) darebbe un file più grande dell'originale. Con CRF 24 e preset slow il risparmio è ragionevole.",
+                "Already well compressed: a low CRF (20-22) would make a file larger than the original. At CRF 24 with the slow preset the saving is reasonable.",
+            )
+            .to_string(),
+        )
+    } else if average < 4.0 {
+        (
+            22,
+            tr_str(
+                "Bitrate nella media: CRF 22 (profilo Intermedio, o Alta qualità con preset slow) è un buon equilibrio.",
+                "An average bitrate: CRF 22 (the Intermediate profile, or High quality with the slow preset) is a good balance.",
+            )
+            .to_string(),
+        )
+    } else {
+        (
+            20,
+            tr_str(
+                "Bitrate alto, con molto da guadagnare: puoi usare Alta qualità (CRF 20, preset slow) e mantenere i dettagli.",
+                "A high bitrate with a lot to gain: you can use High quality (CRF 20, slow preset) and keep the detail.",
+            )
+            .to_string(),
+        )
+    };
+    Some(Recommendation { crf, text })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -692,5 +816,67 @@ mod tests {
             None
         );
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    fn sample(codec: &str, size: u64, seconds: f64) -> crate::scanner::VideoInfo {
+        crate::scanner::VideoInfo {
+            path: PathBuf::from("/a.mkv"),
+            relative_path: "a.mkv".into(),
+            name: "a.mkv".into(),
+            folder: String::new(),
+            extension: "mkv".into(),
+            category: crate::scanner::Category::Convert,
+            codec: Some(codec.into()),
+            size: Some(size),
+            duration: Some(seconds),
+            width: Some(1920),
+            height: Some(1080),
+            error: None,
+            hdr: false,
+        }
+    }
+
+    #[test]
+    fn a_file_heading_for_double_its_size_is_caught_early() {
+        // 4 GB original; 34% done and already 3.6 GB written.
+        let projected = heading_for_too_big(4_000_000_000, 3_600_000_000, 0.34, 0).unwrap();
+        assert!(projected > 10_000_000_000);
+        assert_eq!(
+            heading_for_too_big(4_000_000_000, 600_000_000, 0.34, 0),
+            None
+        );
+    }
+
+    #[test]
+    fn the_first_tenth_of_a_file_proves_nothing() {
+        assert_eq!(
+            heading_for_too_big(4_000_000_000, 900_000_000, 0.05, 0),
+            None
+        );
+    }
+
+    #[test]
+    fn the_minimum_saving_moves_the_line() {
+        // Projected 3.6 GB of 4 GB: fine with no threshold, not with 20%.
+        assert_eq!(
+            heading_for_too_big(4_000_000_000, 1_800_000_000, 0.5, 0),
+            None
+        );
+        assert!(heading_for_too_big(4_000_000_000, 1_800_000_000, 0.5, 20).is_some());
+    }
+
+    #[test]
+    fn the_advice_follows_how_compressed_the_file_is() {
+        // 4 GB in 1h53: about 5 Mb/s at 1080p, already compressed.
+        let remux = recommend_quality(&[sample("h264", 4_000_000_000, 6_800.0)]).unwrap();
+        assert_eq!(remux.crf, 24);
+        // 30 GB for the same film: plenty to gain.
+        let big = recommend_quality(&[sample("h264", 30_000_000_000, 6_800.0)]).unwrap();
+        assert_eq!(big.crf, 20);
+        let tiny = recommend_quality(&[sample("h264", 1_500_000_000, 6_800.0)]).unwrap();
+        assert_eq!(tiny.crf, 26);
+        let old = recommend_quality(&[sample("mpeg4", 1_500_000_000, 6_800.0)]).unwrap();
+        assert_eq!(old.crf, 22);
+        assert_eq!(recommend_quality(&[]), None);
     }
 }

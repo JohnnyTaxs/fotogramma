@@ -47,6 +47,10 @@ pub struct Settings {
     /// percentage. 0 keeps every result.
     #[serde(default)]
     pub min_saving_percent: u8,
+    /// Stop a file as soon as it is clearly heading for a result larger than
+    /// the original (or than the minimum saving allows).
+    #[serde(default = "default_true")]
+    pub stop_if_larger: bool,
     /// Interface language: `auto` (follow the system), `it` or `en`.
     #[serde(default = "default_language")]
     pub language: String,
@@ -118,6 +122,7 @@ impl Default for Settings {
             scan_cache: true,
             prevent_sleep: true,
             min_saving_percent: 0,
+            stop_if_larger: true,
             skipped_update: String::new(),
             accepted_codecs: default_accepted_codecs(),
             replace_original: false,
@@ -201,6 +206,7 @@ mod tests {
             scan_cache: false,
             prevent_sleep: false,
             min_saving_percent: 15,
+            stop_if_larger: false,
             skipped_update: "v9.9.9".to_string(),
             accepted_codecs: vec!["h264".to_string()],
             replace_original: true,
@@ -226,6 +232,7 @@ mod tests {
         assert_eq!(parsed.presets[0].name, "Anime 1080p");
         assert_eq!(parsed.presets[0].aq, Some(3));
         assert_eq!(parsed.min_saving_percent, 15);
+        assert!(!parsed.stop_if_larger);
         assert_eq!(parsed.skipped_update, "v9.9.9");
     }
 
@@ -250,6 +257,7 @@ mod tests {
         assert!(parsed.scan_cache);
         assert!(parsed.presets.is_empty());
         assert_eq!(parsed.min_saving_percent, 0);
+        assert!(parsed.stop_if_larger, "on unless switched off");
         assert!(parsed.skipped_update.is_empty());
     }
 }

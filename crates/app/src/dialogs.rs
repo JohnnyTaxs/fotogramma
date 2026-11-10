@@ -113,6 +113,7 @@ impl ConversionDialog {
             replace_original: defaults.replace_original,
             options: ConversionOptions {
                 min_saving_percent: defaults.min_saving_percent,
+                stop_if_larger: defaults.stop_if_larger,
                 prevent_sleep: defaults.prevent_sleep,
                 ..ConversionOptions::default()
             },
@@ -353,6 +354,49 @@ impl ConversionDialog {
             .join(" ")
     }
 
+    /// The advice for the files in the list, with a button to follow it.
+    fn recommendation(&mut self, ui: &mut egui::Ui) {
+        let Some(advice) = fotogramma_core::conversion::recommend_quality(&self.videos) else {
+            return;
+        };
+        let applied = self.profile_key == "custom" && self.crf == advice.crf;
+        egui::Frame::NONE
+            .fill(theme::SURFACE_ALT)
+            .corner_radius(egui::CornerRadius::same(8))
+            .inner_margin(egui::Margin::same(8))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(tr_str(
+                        "Consiglio per questi file",
+                        "Advice for these files",
+                    ))
+                    .small()
+                    .strong()
+                    .color(theme::LAVENDER),
+                );
+                ui.add(
+                    egui::Label::new(RichText::new(&advice.text).small().color(theme::MUTED))
+                        .wrap(),
+                );
+                if !applied
+                    && ui
+                        .add(theme::secondary_button(fotogramma_core::tr!(
+                            "Usa CRF {} con preset slow",
+                            "Use CRF {} with the slow preset",
+                            advice.crf
+                        )))
+                        .clicked()
+                {
+                    self.profile_key = "custom".to_string();
+                    self.loaded_preset = None;
+                    self.crf = advice.crf;
+                    self.preset = "slow".to_string();
+                    self.pixel = "yuv420p10le".to_string();
+                }
+            });
+        ui.add_space(4.0);
+    }
+
     /// The scrollable body: profile, destination, replacement, and command preview.
     fn form(&mut self, ui: &mut egui::Ui) {
         let custom = self.profile_key == "custom";
@@ -366,6 +410,7 @@ impl ConversionDialog {
         };
         ui.label(RichText::new(description).small().color(theme::MUTED));
         profile_comparison(ui);
+        self.recommendation(ui);
         ui.add_space(6.0);
         egui::Grid::new("conversion-form")
             .num_columns(2)
@@ -583,6 +628,20 @@ impl ConversionDialog {
                     )
                     .labelled_by(saving_label.id);
                 });
+                ui.end_row();
+
+                ui.label("");
+                ui.checkbox(
+                    &mut self.options.stop_if_larger,
+                    tr_str(
+                        "Ferma i file che diventerebbero più grandi dell’originale",
+                        "Stop files that would end up larger than the original",
+                    ),
+                )
+                .on_hover_text(tr_str(
+                    "Dopo il 10% stima la dimensione finale: se è chiaramente troppo grande, interrompe quel file e tiene l’originale",
+                    "After 10% it estimates the final size: if it is clearly too big, it stops that file and keeps the original",
+                ));
                 ui.end_row();
 
                 let order_label = ui.label(tr_str("Ordine", "Order"));
@@ -1687,6 +1746,18 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
                 .small()
                 .color(theme::MUTED),
             );
+            if ui
+                .checkbox(
+                    &mut settings.stop_if_larger,
+                    tr_str(
+                        "Ferma i file che diventerebbero più grandi dell’originale",
+                        "Stop files that would end up larger than the original",
+                    ),
+                )
+                .changed()
+            {
+                changed = true;
+            }
             if ui
                 .checkbox(
                     &mut settings.prevent_sleep,

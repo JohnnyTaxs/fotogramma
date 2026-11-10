@@ -159,6 +159,8 @@ pub struct ConversionOptions {
     /// Keep the original, and drop the result, when the new file saves less
     /// than this percentage. 0 keeps every result.
     pub min_saving_percent: u8,
+    /// Stop a file that is clearly heading for a result too big.
+    pub stop_if_larger: bool,
     /// Keep the computer awake while the queue runs.
     pub prevent_sleep: bool,
     /// Where to keep the queue while it runs, so it can be resumed.
@@ -394,7 +396,11 @@ fn run_conversion(
             &destination,
             (index + 1, total),
             replace_original,
-            (options.min_saving_percent, remaining_seconds),
+            (
+                options.min_saving_percent,
+                remaining_seconds,
+                options.stop_if_larger,
+            ),
             &cancel,
             sender,
             ctx,
@@ -423,7 +429,7 @@ fn convert_one(
     destination: &std::path::Path,
     (file_index, total): (usize, usize),
     replace_original: bool,
-    (min_saving_percent, remaining_seconds): (u8, f64),
+    (min_saving_percent, remaining_seconds, stop_if_larger): (u8, f64, bool),
     cancel: &Arc<AtomicBool>,
     sender: &Sender<ConversionMessage>,
     ctx: &egui::Context,
@@ -474,6 +480,8 @@ fn convert_one(
 
     let mut log: VecDeque<String> = VecDeque::new();
     let mut cancelled = false;
+    // (percent, projected bytes) when the file is stopped for being too big.
+    let mut too_big: Option<(u8, u64)> = None;
     loop {
         if cancel.load(Ordering::Relaxed) {
             let _ = child.kill();
@@ -500,6 +508,24 @@ fn convert_one(
                             eta,
                         });
                         ctx.request_repaint();
+                        if stop_if_larger {
+                            if let (Some(before), Some(now)) =
+                                (original_size, file_size(destination))
+                            {
+                                if let Some(projected) =
+                                    fotogramma_core::conversion::heading_for_too_big(
+                                        before,
+                                        now,
+                                        elapsed / duration,
+                                        min_saving_percent,
+                                    )
+                                {
+                                    let _ = child.kill();
+                                    too_big = Some((percent, projected));
+                                    break;
+                                }
+                            }
+                        }
                     }
                 } else if line == "progress=end" {
                     let _ = sender.send(ConversionMessage::Progress {
@@ -547,6 +573,29 @@ fn convert_one(
             original_size: None,
             new_size: None,
             skipped: false,
+        };
+    }
+
+    if let Some((percent, projected)) = too_big {
+        let _ = std::fs::remove_file(destination);
+        let before = original_size.unwrap_or(0);
+        return ConversionResult {
+            source: video.path.clone(),
+            destination: destination.to_path_buf(),
+            success: false,
+            message: fotogramma_core::tr!(
+                "fermato al {}%: il file finirebbe intorno a {} contro {} dell'originale. Originale tenuto. Prova un CRF più alto.",
+                "stopped at {}%: the file would end around {} against {} for the original. Original kept. Try a higher CRF.",
+                percent,
+                fotogramma_core::formatting::format_bytes(Some(projected)),
+                fotogramma_core::formatting::format_bytes(Some(before))
+            ),
+            cancelled: false,
+            verified: false,
+            replaced: false,
+            original_size,
+            new_size: None,
+            skipped: true,
         };
     }
 
@@ -968,6 +1017,38 @@ mod tests {
                 .unwrap_or(true),
             "the dropped result is deleted"
         );
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_file_that_cannot_save_enough_is_dropped_with_the_early_stop_on() {
+        let Some((ffmpeg, ffprobe)) = tools() else {
+            eprintln!("skipped: no ffmpeg");
+            return;
+        };
+        let directory = scratch("early");
+        let source = clip(&ffmpeg, &directory, "a.mp4");
+        let video = probe_video(&source, &directory, &ffprobe, None).unwrap();
+        let out = directory.join("out");
+        // Whether it is stopped on the way or judged at the end, the outcome is
+        // the same: the original stays and nothing is left in the output folder.
+        let result = convert(
+            video,
+            "fast",
+            "mkv",
+            out.clone(),
+            false,
+            ConversionOptions {
+                min_saving_percent: 99,
+                stop_if_larger: true,
+                ..ConversionOptions::default()
+            },
+        );
+        assert!(result.skipped && !result.success, "{}", result.message);
+        assert!(source.exists());
+        assert!(std::fs::read_dir(&out)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true));
         let _ = std::fs::remove_dir_all(&directory);
     }
 
