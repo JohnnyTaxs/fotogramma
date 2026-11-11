@@ -136,11 +136,79 @@ pub struct DiscoveryWarning {
     pub message: String,
 }
 
+/// Which files a scan looks at: the extensions to include, and words that
+/// leave a file out when its name contains them (openings, endings, trailers).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScanFilter {
+    pub extensions: Vec<String>,
+    pub excluded_names: Vec<String>,
+}
+
+impl Default for ScanFilter {
+    fn default() -> Self {
+        Self {
+            extensions: VIDEO_EXTENSIONS
+                .iter()
+                .map(|value| value.to_string())
+                .collect(),
+            excluded_names: Vec::new(),
+        }
+    }
+}
+
+impl ScanFilter {
+    /// Only the file name counts, so a folder called `Intro` does not hide
+    /// everything inside it. Both checks ignore case.
+    pub fn accepts(&self, path: &Path) -> bool {
+        let extension = extension_of(path);
+        if !VIDEO_EXTENSIONS.contains(&extension.as_str())
+            || !self
+                .extensions
+                .iter()
+                .any(|value| value.eq_ignore_ascii_case(&extension))
+        {
+            return false;
+        }
+        let name = file_name(path).to_lowercase();
+        !self
+            .excluded_names
+            .iter()
+            .map(|word| word.trim().to_lowercase())
+            .any(|word| !word.is_empty() && name.contains(&word))
+    }
+
+    /// Split a comma-separated list of words, as typed in the settings.
+    pub fn parse_words(text: &str) -> Vec<String> {
+        text.split([',', ';', '\n'])
+            .map(str::trim)
+            .filter(|word| !word.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+}
+
 /// Recursively discover videos without following symbolic links.
 /// Directory read failures are reported and the scan continues, unless the
 /// root directory itself cannot be read.
 pub fn discover_videos(
     directory: &Path,
+    cancel: Option<&AtomicBool>,
+    on_progress: impl FnMut(usize, &str),
+    on_error: impl FnMut(&Path, &str),
+) -> Result<Vec<PathBuf>, String> {
+    discover_videos_filtered(
+        directory,
+        &ScanFilter::default(),
+        cancel,
+        on_progress,
+        on_error,
+    )
+}
+
+/// [`discover_videos`], keeping only the files `filter` accepts.
+pub fn discover_videos_filtered(
+    directory: &Path,
+    filter: &ScanFilter,
     cancel: Option<&AtomicBool>,
     mut on_progress: impl FnMut(usize, &str),
     mut on_error: impl FnMut(&Path, &str),
@@ -150,6 +218,7 @@ pub fn discover_videos(
     walk(
         directory,
         &root,
+        filter,
         cancel,
         &mut candidates,
         &mut on_progress,
@@ -161,6 +230,7 @@ pub fn discover_videos(
 fn walk(
     directory: &Path,
     root: &Path,
+    filter: &ScanFilter,
     cancel: Option<&AtomicBool>,
     candidates: &mut Vec<PathBuf>,
     on_progress: &mut impl FnMut(usize, &str),
@@ -209,18 +279,22 @@ fn walk(
         if is_cancelled(cancel) {
             return Ok(());
         }
-        walk(&path, root, cancel, candidates, on_progress, on_error)?;
+        walk(
+            &path,
+            root,
+            filter,
+            cancel,
+            candidates,
+            on_progress,
+            on_error,
+        )?;
     }
 
     for path in files {
         if is_cancelled(cancel) {
             return Ok(());
         }
-        let extension = path
-            .extension()
-            .map(|value| value.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        if !VIDEO_EXTENSIONS.contains(&extension.as_str()) {
+        if !filter.accepts(&path) {
             continue;
         }
         candidates.push(path.clone());
@@ -238,6 +312,24 @@ fn is_cancelled(cancel: Option<&AtomicBool>) -> bool {
     cancel
         .map(|flag| flag.load(Ordering::Relaxed))
         .unwrap_or(false)
+}
+
+/// The deepest folder that holds every path, so the videos of an imported
+/// list get short relative paths.
+pub fn common_folder(paths: &[PathBuf]) -> PathBuf {
+    let mut common: Option<PathBuf> = None;
+    for path in paths {
+        let parent = path.parent().unwrap_or(path).to_path_buf();
+        common = Some(match common {
+            None => parent,
+            Some(current) => current
+                .ancestors()
+                .find(|ancestor| parent.starts_with(ancestor))
+                .map(Path::to_path_buf)
+                .unwrap_or_default(),
+        });
+    }
+    common.unwrap_or_default()
 }
 
 pub fn relative_path(path: &Path, root: &Path) -> String {
@@ -714,6 +806,61 @@ mod tests {
         assert_eq!(videos[2].category, Category::Error);
         reclassify(&mut videos, &[]);
         assert_eq!(videos[1].category, Category::Convert);
+    }
+
+    #[test]
+    fn the_filter_leaves_out_extensions_and_names() {
+        let filter = ScanFilter {
+            extensions: vec!["MKV".to_string(), "mp4".to_string()],
+            excluded_names: ScanFilter::parse_words(" NCOP, nced ;; "),
+        };
+        assert_eq!(filter.excluded_names, vec!["NCOP", "nced"]);
+        assert!(filter.accepts(Path::new("/a/Intro/Show - 01.mkv")));
+        assert!(filter.accepts(Path::new("/a/b.MP4")));
+        assert!(!filter.accepts(Path::new("/a/opening.webm")));
+        assert!(!filter.accepts(Path::new("/a/Show - ncop1.mkv")));
+        assert!(!filter.accepts(Path::new("/a/Show NCED.mp4")));
+        assert!(!filter.accepts(Path::new("/a/notes.txt")));
+        assert!(ScanFilter::default().accepts(Path::new("/a/x.webm")));
+    }
+
+    #[test]
+    fn the_common_folder_holds_every_path() {
+        let paths: Vec<PathBuf> = [
+            "/media/shows/a/1.mkv",
+            "/media/shows/b/2.mkv",
+            "/media/shows/3.mp4",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        assert_eq!(common_folder(&paths), PathBuf::from("/media/shows"));
+        assert_eq!(common_folder(&paths[..1]), PathBuf::from("/media/shows/a"));
+        assert_eq!(common_folder(&[]), PathBuf::new());
+    }
+
+    #[test]
+    fn discovery_applies_the_filter() {
+        let root = std::env::temp_dir().join(format!("fotogramma-filter-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("Intro")).unwrap();
+        for name in ["a.mkv", "b.webm", "Show NCOP.mp4", "Intro/c.mp4"] {
+            fs::write(root.join(name), "").unwrap();
+        }
+        let filter = ScanFilter {
+            extensions: vec!["mkv".to_string(), "mp4".to_string()],
+            excluded_names: vec!["ncop".to_string()],
+        };
+        let found = discover_videos_filtered(&root, &filter, None, |_, _| {}, |_, _| {}).unwrap();
+        let names: Vec<String> = found.iter().map(|path| file_name(path)).collect();
+        assert_eq!(names, vec!["c.mp4", "a.mkv"]);
+        assert_eq!(
+            discover_videos(&root, None, |_, _| {}, |_, _| {})
+                .unwrap()
+                .len(),
+            4
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

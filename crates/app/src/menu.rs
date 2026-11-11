@@ -10,6 +10,7 @@ use fotogramma_core::i18n::tr_str;
 pub enum MenuAction {
     ChooseFolder,
     Scan,
+    Import,
     Export,
     ConvertSelected,
     CloseWindow,
@@ -28,9 +29,10 @@ pub enum MenuAction {
     Quit,
 }
 
-pub const ALL_ACTIONS: [MenuAction; 18] = [
+pub const ALL_ACTIONS: [MenuAction; 19] = [
     MenuAction::ChooseFolder,
     MenuAction::Scan,
+    MenuAction::Import,
     MenuAction::Export,
     MenuAction::ConvertSelected,
     MenuAction::CloseWindow,
@@ -117,6 +119,7 @@ impl MenuAction {
         match self {
             MenuAction::ChooseFolder => tr_str("Scegli cartella…", "Choose Folder…"),
             MenuAction::Scan => tr_str("Analizza libreria", "Scan Library"),
+            MenuAction::Import => tr_str("Importa elenco…", "Import List…"),
             MenuAction::Export => tr_str("Esporta da convertire…", "Export To Convert…"),
             MenuAction::ConvertSelected => tr_str("Converti selezionati…", "Convert Selected…"),
             MenuAction::CloseWindow => tr_str("Chiudi finestra", "Close Window"),
@@ -142,6 +145,7 @@ impl MenuAction {
         match self {
             MenuAction::ChooseFolder => plain(Key::O),
             MenuAction::Scan => plain(Key::R),
+            MenuAction::Import => plain(Key::I),
             MenuAction::Export => plain(Key::E),
             MenuAction::ConvertSelected => plain(Key::Enter),
             MenuAction::CloseWindow => plain(Key::W),
@@ -191,6 +195,7 @@ pub fn menus(native_app_menu: bool) -> Vec<Menu> {
         Action(MenuAction::ChooseFolder),
         Action(MenuAction::Scan),
         Separator,
+        Action(MenuAction::Import),
         Action(MenuAction::Export),
         Action(MenuAction::ConvertSelected),
         Separator,
@@ -278,7 +283,9 @@ pub struct MenuState {
 impl MenuState {
     pub fn enabled(&self, action: MenuAction) -> bool {
         match action {
-            MenuAction::ChooseFolder | MenuAction::Scan => self.idle && !self.converting,
+            MenuAction::ChooseFolder | MenuAction::Scan | MenuAction::Import => {
+                self.idle && !self.converting
+            }
             MenuAction::Export => self.idle && self.can_export,
             MenuAction::ConvertSelected => self.idle && self.can_convert,
             MenuAction::SelectAll
@@ -518,6 +525,7 @@ mod tests {
         };
         assert!(!state.enabled(MenuAction::Scan));
         assert!(!state.enabled(MenuAction::ChooseFolder));
+        assert!(!state.enabled(MenuAction::Import));
         assert!(
             state.enabled(MenuAction::ConvertSelected),
             "more can be queued"

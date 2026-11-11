@@ -7,7 +7,7 @@ use fotogramma_core::conversion::{
     MediaKind, PRESETS,
 };
 use fotogramma_core::formatting::{codec_label, format_bytes, format_duration, SpaceChange};
-use fotogramma_core::scanner::VideoInfo;
+use fotogramma_core::scanner::{ScanFilter, VideoInfo};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
@@ -2069,6 +2069,58 @@ pub fn show_settings(ctx: &egui::Context, settings: &mut Settings) -> SettingsOu
                 RichText::new(tr_str(
                     "Una nuova scansione rilegge solo i file cambiati (stesso percorso, dimensione e data).",
                     "A new scan only reads the files that changed (same path, size and date).",
+                ))
+                .small()
+                .color(theme::MUTED),
+            );
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(tr_str("Estensioni analizzate", "Scanned extensions"));
+                for (key, label) in [("mp4", "MP4"), ("mkv", "MKV"), ("webm", "WebM")] {
+                    let mut included = settings.scan_extensions.iter().any(|value| value == key);
+                    // The last extension cannot be switched off: the scan would find nothing.
+                    let last = included && settings.scan_extensions.len() == 1;
+                    if ui
+                        .add_enabled(!last, egui::Checkbox::new(&mut included, label))
+                        .changed()
+                    {
+                        settings.scan_extensions.retain(|value| value != key);
+                        if included {
+                            settings.scan_extensions.push(key.to_string());
+                        }
+                        changed = true;
+                    }
+                }
+            });
+            let names_label = ui.label(tr_str(
+                "Escludi i file il cui nome contiene",
+                "Leave out files whose name contains",
+            ));
+            // The words are edited as one line of text and kept as a list.
+            let buffer_id = egui::Id::unique("settings-excluded-names");
+            let mut words = ui
+                .data_mut(|data| data.get_temp::<String>(buffer_id))
+                .filter(|text| ScanFilter::parse_words(text) == settings.excluded_names)
+                .unwrap_or_else(|| settings.excluded_names.join(", "));
+            let edit = ui
+                .add(
+                    egui::TextEdit::singleline(&mut words)
+                        .hint_text(tr_str(
+                            "Es. NCOP, NCED, trailer",
+                            "E.g. NCOP, NCED, trailer",
+                        ))
+                        .desired_width(420.0),
+                )
+                .labelled_by(names_label.id);
+            if edit.changed() {
+                settings.excluded_names = ScanFilter::parse_words(&words);
+                changed = true;
+            }
+            ui.data_mut(|data| data.insert_temp(buffer_id, words));
+            ui.label(
+                RichText::new(tr_str(
+                    "Parole separate da virgole, maiuscole o minuscole. Valgono dalla prossima scansione e per gli elenchi importati.",
+                    "Words separated by commas, in any case. They apply from the next scan and to imported lists.",
                 ))
                 .small()
                 .color(theme::MUTED),

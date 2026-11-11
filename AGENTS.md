@@ -15,7 +15,7 @@ Operational guide for agents modifying **Fotogramma Desktop** (v2, Rust). The we
 - No CDN or online service is required at runtime; if GitHub is unreachable the app works exactly the same.
 - **Updates are verified before they are installed.** The package must be an asset of this repository's release, its SHA-256 must match `SHA256SUMS.txt` (published by `create_release.py`), and on macOS `codesign --verify` must pass before the swap. A development binary (`cargo run`) is never replaced. The swap runs in a helper after the app quits and restores the old copy if the move fails: a shell script on macOS and Linux, and on Windows a copy of the program itself (`fotogramma.exe --apply-update`, run from the temp folder, `apply_swap`). Never a hidden `.cmd` or `ping` loop: that is the pattern Windows Defender flags.
 - **Two languages: Italian and English.** Every user-visible string goes through `tr_str` or `tr!` with both texts (never a bare literal), including messages built in `core` and on worker threads. The language is process-wide (`i18n::set_lang`); Italian is the default, `auto` follows the OS through `sys-locale`, and the Settings window can override it. Prefer "Label: {}" over "{} items" so no plural form is needed. Tests fix the system locale to `it-IT`; UI tests take the `lang_guard` lock, and English output is tested in `crates/core/tests/english.rs`.
-- `settings.toml` stores the directory, window size, language, accepted codecs, conversion defaults (replace original, profile, container, content type, output folder, minimum saving, keep awake), the user's presets, and the cache switch. Scan results are never in it. The only copy of probe results is `scan-cache.json` (readable videos only, keyed by path, size and mtime, written atomically, switchable and clearable), and `queue.json` exists only while a queue runs. Do not store anything else about the library.
+- `settings.toml` stores the directory, window size, language, accepted codecs, conversion defaults (replace original, profile, container, content type, output folder, minimum saving, keep awake), the user's presets, the cache switch, and the scan filter (included extensions, excluded name words; matched on the file name only). Scan results are never in it. The only copy of probe results is `scan-cache.json` (readable videos only, keyed by path, size and mtime, written atomically, switchable and clearable), and `queue.json` exists only while a queue runs. Do not store anything else about the library.
 - Build **onedir** for each OS/architecture, never onefile and never cross-compiled. macOS also ships a drag-to-Applications `.dmg` (`dmgbuild`, background in `deployment/dmg/`); the ZIP stays because the updater installs it.
 - The packaged app must stay within **45 MB** with a ZIP (and the DMG) within **18 MB**.
 
@@ -56,7 +56,7 @@ git diff --check
 | `crates/app/src/native_menu.rs` | The macOS menu bar, built with `muda` from `menu.rs`. macOS only; no GTK anywhere. |
 | `crates/core/src/cache.rs` | Scan cache. A hit needs the same path, size and mtime; unreadable files are never cached. |
 | `crates/core/src/queue.rs` | The running queue on disk, so it can be resumed; removed when the queue ends or is stopped. |
-| `crates/core/src/export.rs` | Paths, CSV (formulas defused) and JSON lists, and bitrate. |
+| `crates/core/src/export.rs` | Paths, CSV (formulas defused) and JSON lists, bitrate, and `read_paths` for importing a list back. An imported list is probed again (`worker::spawn_import`), never trusted, and never prunes the cache. |
 | `crates/core/src/paths.rs` | The configuration folder, shared by the app and the CLI. |
 | `crates/core/src/bin/fotogramma-cli.rs` | The command line tool: no window, no network, same engine. Keep it free of UI code. |
 | `crates/core/src/update.rs` | Release check, verified download, staging, and the swap helper. The only module that uses the network. |
@@ -72,7 +72,7 @@ git diff --check
 | `crates/app/src/settings.rs` | TOML preferences and defaults (accepted codecs, conversion defaults); config directory disabled under `cfg!(test)`. |
 | `crates/app/src/platform.rs` | Open a folder in the system file manager. |
 
-Data flow: directory → `discover_videos` → `probe_videos` → `mpsc` → app state → `TableBuilder`.
+Data flow: directory → `discover_videos_filtered` → `probe_videos` → `mpsc` → app state → `TableBuilder`. Starting a scan or an import clears the previous library first (`clear_results`), so nothing acts on stale rows.
 
 ## Threads and shutdown
 

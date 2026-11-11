@@ -2,6 +2,7 @@
 //! defaults (accepted codecs, conversion defaults). Scan results are never
 //! stored.
 
+use fotogramma_core::scanner::ScanFilter;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -86,6 +87,12 @@ pub struct Settings {
     /// Output container for new files: `mkv` or `mp4`.
     #[serde(default = "default_container")]
     pub default_container: String,
+    /// Extensions a scan includes: some of `mp4`, `mkv`, `webm`.
+    #[serde(default = "default_scan_extensions")]
+    pub scan_extensions: Vec<String>,
+    /// Words that leave a file out of the scan when its name contains them.
+    #[serde(default)]
+    pub excluded_names: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -112,6 +119,10 @@ fn default_container() -> String {
     "mkv".to_string()
 }
 
+fn default_scan_extensions() -> Vec<String> {
+    ScanFilter::default().extensions
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -134,11 +145,21 @@ impl Default for Settings {
             content_type: default_content_type(),
             output_dir: String::new(),
             default_container: default_container(),
+            scan_extensions: default_scan_extensions(),
+            excluded_names: Vec::new(),
         }
     }
 }
 
 impl Settings {
+    /// What a scan or an imported list leaves out.
+    pub fn scan_filter(&self) -> ScanFilter {
+        ScanFilter {
+            extensions: self.scan_extensions.clone(),
+            excluded_names: self.excluded_names.clone(),
+        }
+    }
+
     pub fn load() -> Self {
         let Some(path) = config_file() else {
             return Self::default();
@@ -219,6 +240,8 @@ mod tests {
             content_type: "anime".to_string(),
             output_dir: "/Volumes/Out".to_string(),
             default_container: "mp4".to_string(),
+            scan_extensions: vec!["mkv".to_string()],
+            excluded_names: vec!["NCOP".to_string()],
         };
         let text = toml::to_string_pretty(&settings).unwrap();
         let parsed: Settings = toml::from_str(&text).unwrap();
@@ -239,6 +262,8 @@ mod tests {
         assert_eq!(parsed.min_saving_percent, 15);
         assert!(!parsed.stop_if_larger);
         assert_eq!(parsed.skipped_update, "v9.9.9");
+        assert_eq!(parsed.scan_extensions, vec!["mkv"]);
+        assert_eq!(parsed.excluded_names, vec!["NCOP"]);
     }
 
     #[test]
@@ -265,5 +290,7 @@ mod tests {
         assert_eq!(parsed.min_saving_percent, 0);
         assert!(parsed.stop_if_larger, "on unless switched off");
         assert!(parsed.skipped_update.is_empty());
+        assert_eq!(parsed.scan_extensions, vec!["mp4", "mkv", "webm"]);
+        assert!(parsed.excluded_names.is_empty());
     }
 }

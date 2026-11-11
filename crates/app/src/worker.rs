@@ -11,7 +11,10 @@ use fotogramma_core::formatting::SpaceChange;
 use fotogramma_core::i18n::tr_str;
 use fotogramma_core::media_tools::{ffmpeg_path, ffprobe_path, prepare_command};
 use fotogramma_core::queue::PendingQueue;
-use fotogramma_core::scanner::{discover_videos, probe_videos_cached, DiscoveryWarning, VideoInfo};
+use fotogramma_core::scanner::{
+    common_folder, discover_videos_filtered, probe_videos_cached, DiscoveryWarning, ScanFilter,
+    VideoInfo,
+};
 use fotogramma_core::update::{self, InstallTarget, Release};
 use fotogramma_core::verification::{
     replace_verified_output, subtitle_codecs, validate_conversion_output_with_progress,
@@ -51,6 +54,8 @@ pub struct ScanOptions {
     pub cache_file: Option<PathBuf>,
     /// The output folder of the settings, to find earlier conversions.
     pub output_dir: String,
+    /// The extensions and names the scan leaves out.
+    pub filter: ScanFilter,
 }
 
 pub fn spawn_scan(
@@ -76,7 +81,8 @@ fn run_scan(
     sender: &Sender<ScanMessage>,
     ctx: &egui::Context,
 ) -> Result<(), String> {
-    let ffprobe = ffprobe_path()?;
+    // Fail before walking a large library when ffprobe is missing.
+    ffprobe_path()?;
     let mut warnings = Vec::new();
 
     let mut discovered = |found: usize, current: &str| {
@@ -93,8 +99,9 @@ fn run_scan(
             message: message.to_string(),
         });
     };
-    let candidates = discover_videos(
+    let candidates = discover_videos_filtered(
         directory,
+        &options.filter,
         Some(cancel),
         &mut discovered,
         &mut discovery_error,
@@ -110,7 +117,66 @@ fn run_scan(
         });
         return Ok(());
     }
+    probe_and_send(
+        &candidates,
+        directory,
+        true,
+        options,
+        cancel,
+        warnings,
+        sender,
+        ctx,
+    )
+}
 
+/// Probe the videos of an imported list instead of walking a folder. Paths
+/// the filter leaves out are skipped; files that are gone show up as errors.
+pub fn spawn_import(
+    paths: Vec<PathBuf>,
+    options: ScanOptions,
+    cancel: Arc<AtomicBool>,
+    ctx: egui::Context,
+) -> Receiver<ScanMessage> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let candidates: Vec<PathBuf> = paths
+            .into_iter()
+            .filter(|path| options.filter.accepts(path))
+            .collect();
+        let root = common_folder(&candidates);
+        let result = probe_and_send(
+            &candidates,
+            &root,
+            false,
+            &options,
+            &cancel,
+            Vec::new(),
+            &sender,
+            &ctx,
+        );
+        if let Err(message) = result {
+            let _ = sender.send(ScanMessage::Failed(message));
+        }
+        ctx.request_repaint();
+    });
+    receiver
+}
+
+/// Probe `candidates` and send the result. `complete_folder` is true for a
+/// scan of the whole `root`, the only case where the cache may forget files
+/// it did not see.
+#[allow(clippy::too_many_arguments)]
+fn probe_and_send(
+    candidates: &[PathBuf],
+    directory: &std::path::Path,
+    complete_folder: bool,
+    options: &ScanOptions,
+    cancel: &Arc<AtomicBool>,
+    warnings: Vec<DiscoveryWarning>,
+    sender: &Sender<ScanMessage>,
+    ctx: &egui::Context,
+) -> Result<(), String> {
+    let ffprobe = ffprobe_path()?;
     let mut progressed = |processed: usize, total: usize, current: &str, _info: &VideoInfo| {
         let _ = sender.send(ScanMessage::Progress {
             processed,
@@ -121,7 +187,7 @@ fn run_scan(
     };
     let cache = options.cache_file.as_deref().map(ScanCache::load);
     let outcome = probe_videos_cached(
-        &candidates,
+        candidates,
         directory,
         &ffprobe,
         Some(cancel),
@@ -129,7 +195,7 @@ fn run_scan(
         &mut progressed,
     );
     if let (Some(cache), Some(file)) = (&cache, &options.cache_file) {
-        cache.finish(directory, !outcome.cancelled);
+        cache.finish(directory, complete_folder && !outcome.cancelled);
         // A cache that cannot be written only costs speed next time.
         let _ = cache.save(file);
     }
@@ -1218,6 +1284,7 @@ mod tests {
                 ScanOptions {
                     cache_file: Some(cache.to_path_buf()),
                     output_dir: String::new(),
+                    filter: ScanFilter::default(),
                 },
                 Arc::new(AtomicBool::new(false)),
                 egui::Context::default(),

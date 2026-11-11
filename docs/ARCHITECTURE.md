@@ -144,7 +144,7 @@ Cinema Pop colors and embedded **Outfit** (a static Regular instance of the vari
 
 ### `crates/app/src/settings.rs`
 
-Reads and writes `settings.toml` in `~/Library/Application Support/Fotogramma`, `%APPDATA%\Fotogramma`, or `$XDG_CONFIG_HOME/fotogramma`. The directory, window size, language, accepted codecs, conversion defaults, the user's presets, and the cache switch are stored. Scan results are not in `settings.toml`; the only copy of them is the scan cache described below. Changing the accepted codecs re-classifies the loaded library with `scanner::reclassify` instead of scanning again. The config directory is disabled under `cfg!(test)` so snapshots never touch user files.
+Reads and writes `settings.toml` in `~/Library/Application Support/Fotogramma`, `%APPDATA%\Fotogramma`, or `$XDG_CONFIG_HOME/fotogramma`. The directory, window size, language, accepted codecs, conversion defaults, the user's presets, the cache switch, and the scan filter (included extensions and excluded name words, `scanner::ScanFilter`) are stored. Scan results are not in `settings.toml`; the only copy of them is the scan cache described below. Changing the accepted codecs re-classifies the loaded library with `scanner::reclassify` instead of scanning again. The config directory is disabled under `cfg!(test)` so snapshots never touch user files.
 
 ## UI states
 

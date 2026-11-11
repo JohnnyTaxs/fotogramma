@@ -455,10 +455,36 @@ fn verify_signature(staged: &Path) -> Result<(), String> {
     })
 }
 
-/// Remove a staging folder left behind by an interrupted update.
+/// Remove a staging folder left behind by an interrupted update, and the old
+/// copy a swap could not delete (on Windows a file of the program that just
+/// quit can stay locked for a while).
 pub fn clean_staging(target: &InstallTarget) {
     if let Some(staging) = target.staging_directory() {
         let _ = fs::remove_dir_all(staging);
+    }
+    let old = old_copy(&target.path);
+    if old.exists() {
+        let _ = fs::remove_dir_all(old);
+    }
+}
+
+/// Where the swap moves the installed copy before putting the new one in place.
+fn old_copy(installed: &Path) -> PathBuf {
+    let mut name = installed.as_os_str().to_owned();
+    name.push(".fotogramma-old");
+    PathBuf::from(name)
+}
+
+/// Delete a folder, trying again while something still holds a file in it.
+fn remove_with_retries(path: &Path, tries: u32, delay: Duration) {
+    for attempt in 0..tries {
+        match fs::remove_dir_all(path) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {}
+            _ => return,
+        }
+        if attempt + 1 < tries {
+            std::thread::sleep(delay);
+        }
     }
 }
 
@@ -510,9 +536,7 @@ fn apply_swap_with(
     tries: u32,
     delay: Duration,
 ) -> Result<(), String> {
-    let mut old_name = installed.as_os_str().to_owned();
-    old_name.push(".fotogramma-old");
-    let old = PathBuf::from(old_name);
+    let old = old_copy(installed);
     let _ = fs::remove_dir_all(&old);
     let mut moved = Err(String::new());
     for attempt in 0..tries {
@@ -525,22 +549,20 @@ fn apply_swap_with(
         }
     }
     moved?;
-    match fs::rename(staged, installed) {
-        Ok(()) => {
-            let _ = fs::remove_dir_all(&old);
-        }
-        Err(error) => {
-            let _ = fs::rename(&old, installed);
-            return Err(error.to_string());
-        }
+    if let Err(error) = fs::rename(staged, installed) {
+        let _ = fs::rename(&old, installed);
+        return Err(error.to_string());
     }
-    let _ = fs::remove_dir_all(staging);
     if relaunch {
         let executable = installed.join(format!("fotogramma{}", std::env::consts::EXE_SUFFIX));
         let _ = Command::new(executable)
             .current_dir(std::env::temp_dir())
             .spawn();
     }
+    // The old copy can still be locked by the process that just quit (or by
+    // an antivirus scan): keep trying, and the next start removes what is left.
+    remove_with_retries(&old, tries.min(40), delay);
+    remove_with_retries(staging, tries.min(40), delay);
     Ok(())
 }
 
@@ -893,6 +915,22 @@ mod tests {
             Duration::ZERO,
         );
         assert!(result.is_err());
+        let _ = fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_leftover_old_copy_is_removed_at_the_next_start() {
+        let directory = scratch("leftover");
+        let installed = directory.join("Fotogramma");
+        let old = directory.join("Fotogramma.fotogramma-old");
+        fs::create_dir_all(&installed).unwrap();
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join("fotogramma.exe"), "old").unwrap();
+        clean_staging(&InstallTarget {
+            path: installed.clone(),
+        });
+        assert!(!old.exists());
+        assert!(installed.exists());
         let _ = fs::remove_dir_all(&directory);
     }
 

@@ -12,7 +12,8 @@ use fotogramma_core::formatting::{format_bytes, format_int};
 use fotogramma_core::i18n::{set_lang, tr_str, Lang};
 use fotogramma_core::media_tools::ffprobe_path;
 use fotogramma_core::scanner::{
-    discover_videos, probe_videos_cached, reclassify, summarize, Category, VideoInfo,
+    common_folder, discover_videos_filtered, probe_videos_cached, reclassify, summarize, Category,
+    ScanFilter, VideoInfo, VIDEO_EXTENSIONS,
 };
 use fotogramma_core::tr;
 use std::io::{IsTerminal, Write};
@@ -22,6 +23,9 @@ use std::process::ExitCode;
 #[derive(Debug, PartialEq)]
 struct ScanArgs {
     directory: PathBuf,
+    /// A list exported earlier, probed instead of a folder.
+    from_list: Option<PathBuf>,
+    filter: ScanFilter,
     format: Format,
     only: Option<Category>,
     codecs: Vec<String>,
@@ -68,6 +72,8 @@ fn parse(arguments: &[String]) -> Result<Command, String> {
     }
     let mut args = ScanArgs {
         directory: PathBuf::new(),
+        from_list: None,
+        filter: ScanFilter::default(),
         format: Format::Paths,
         only: Some(Category::Convert),
         codecs: vec!["hevc".to_string(), "av1".to_string()],
@@ -118,6 +124,32 @@ fn parse(arguments: &[String]) -> Result<Command, String> {
                     .filter(|codec| !codec.is_empty())
                     .collect();
             }
+            "--exclude-ext" => {
+                for extension in ScanFilter::parse_words(&value("--exclude-ext")?) {
+                    let extension = extension.trim_start_matches('.').to_lowercase();
+                    if !VIDEO_EXTENSIONS.contains(&extension.as_str()) {
+                        return Err(usage_error(tr!(
+                            "estensione sconosciuta «{extension}» (mp4, mkv o webm)",
+                            "unknown extension “{extension}” (mp4, mkv or webm)"
+                        )));
+                    }
+                    args.filter.extensions.retain(|value| *value != extension);
+                }
+                if args.filter.extensions.is_empty() {
+                    return Err(usage_error(
+                        tr_str(
+                            "non resta nessuna estensione da analizzare",
+                            "no extension is left to scan",
+                        )
+                        .to_string(),
+                    ));
+                }
+            }
+            "--exclude" => args
+                .filter
+                .excluded_names
+                .extend(ScanFilter::parse_words(&value("--exclude")?)),
+            "--from-list" => args.from_list = Some(PathBuf::from(value("--from-list")?)),
             "--cache" => args.cache = CacheChoice::File(PathBuf::from(value("--cache")?)),
             "--no-cache" => args.cache = CacheChoice::Off,
             "--output" | "-o" => args.output = Some(PathBuf::from(value("--output")?)),
@@ -138,15 +170,28 @@ fn parse(arguments: &[String]) -> Result<Command, String> {
             }
         }
     }
-    args.directory = directory.ok_or_else(|| {
-        usage_error(
-            tr_str(
-                "manca la cartella da analizzare",
-                "missing the folder to scan",
-            )
-            .to_string(),
-        )
-    })?;
+    match (directory, &args.from_list) {
+        (Some(_), Some(_)) => {
+            return Err(usage_error(
+                tr_str(
+                    "indica una cartella oppure --from-list, non entrambi",
+                    "give a folder or --from-list, not both",
+                )
+                .to_string(),
+            ))
+        }
+        (Some(directory), None) => args.directory = directory,
+        (None, Some(_)) => {}
+        (None, None) => {
+            return Err(usage_error(
+                tr_str(
+                    "manca la cartella da analizzare",
+                    "missing the folder to scan",
+                )
+                .to_string(),
+            ))
+        }
+    }
     Ok(Command::Scan(Box::new(args)))
 }
 
@@ -156,12 +201,16 @@ fn help() -> String {
 
 USO
   fotogramma-cli scan <cartella> [opzioni]
+  fotogramma-cli scan --from-list <file> [opzioni]
 
 OPZIONI
+      --from-list <file>        rilegge i video di un elenco esportato (txt, csv o json)
   -f, --format <txt|csv|json>   formato dell'elenco (predefinito: txt, un percorso per riga)
       --only <convert|compatible|error|all>
                                 cosa elencare (predefinito: convert)
       --codecs <elenco>         codec già accettati, separati da virgola (predefinito: hevc,av1)
+      --exclude-ext <elenco>    estensioni da saltare, separate da virgola (es. webm)
+      --exclude <parole>        salta i file il cui nome contiene queste parole (es. NCOP,NCED)
       --cache <file>            usa questo file di cache
       --no-cache                rilegge tutto con ffprobe
   -o, --output <file>           scrive qui invece che su stdout
@@ -177,12 +226,16 @@ Codici di uscita: 0 ok, 1 ci sono video da convertire (con --fail-if-convert), 2
 
 USAGE
   fotogramma-cli scan <folder> [options]
+  fotogramma-cli scan --from-list <file> [options]
 
 OPTIONS
+      --from-list <file>        read again the videos of an exported list (txt, csv or json)
   -f, --format <txt|csv|json>   list format (default: txt, one path per line)
       --only <convert|compatible|error|all>
                                 what to list (default: convert)
       --codecs <list>           codecs already accepted, comma separated (default: hevc,av1)
+      --exclude-ext <list>      extensions to skip, comma separated (e.g. webm)
+      --exclude <words>         skip files whose name contains these words (e.g. NCOP,NCED)
       --cache <file>            use this cache file
       --no-cache                read everything again with ffprobe
   -o, --output <file>           write here instead of stdout
@@ -198,26 +251,55 @@ Exit codes: 0 ok, 1 there are videos to convert (with --fail-if-convert), 2 erro
     .to_string()
 }
 
+/// The videos of a list exported earlier, that the filter keeps, and the
+/// folder they all live in.
+fn read_list(
+    file: &std::path::Path,
+    filter: &ScanFilter,
+) -> Result<(Vec<PathBuf>, PathBuf), String> {
+    let format = Format::from_extension(
+        &file
+            .extension()
+            .map(|extension| extension.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    );
+    let text =
+        std::fs::read_to_string(file).map_err(|error| format!("{}: {error}", file.display()))?;
+    let paths: Vec<PathBuf> = export::read_paths(&text, format)?
+        .into_iter()
+        .filter(|path| filter.accepts(path))
+        .collect();
+    let root = common_folder(&paths);
+    Ok((paths, root))
+}
+
 fn run_scan(args: &ScanArgs) -> Result<ExitCode, String> {
-    if !args.directory.is_dir() {
-        return Err(tr!(
-            "«{}» non è una cartella",
-            "“{}” is not a folder",
-            args.directory.display()
-        ));
-    }
+    let (candidates, root) = match &args.from_list {
+        Some(file) => read_list(file, &args.filter)?,
+        None => {
+            if !args.directory.is_dir() {
+                return Err(tr!(
+                    "«{}» non è una cartella",
+                    "“{}” is not a folder",
+                    args.directory.display()
+                ));
+            }
+            let candidates = discover_videos_filtered(
+                &args.directory,
+                &args.filter,
+                None,
+                |_, _| {},
+                |path, message| {
+                    if !args.quiet {
+                        eprintln!("{}: {message}", path.display());
+                    }
+                },
+            )?;
+            (candidates, args.directory.clone())
+        }
+    };
     let ffprobe = ffprobe_path()?;
     let show = !args.quiet && std::io::stderr().is_terminal();
-    let candidates = discover_videos(
-        &args.directory,
-        None,
-        |_, _| {},
-        |path, message| {
-            if !args.quiet {
-                eprintln!("{}: {message}", path.display());
-            }
-        },
-    )?;
 
     let cache_file = match &args.cache {
         CacheChoice::Off => None,
@@ -228,7 +310,7 @@ fn run_scan(args: &ScanArgs) -> Result<ExitCode, String> {
     let total = candidates.len();
     let outcome = probe_videos_cached(
         &candidates,
-        &args.directory,
+        &root,
         &ffprobe,
         None,
         cache.as_ref(),
@@ -242,7 +324,8 @@ fn run_scan(args: &ScanArgs) -> Result<ExitCode, String> {
         eprintln!();
     }
     if let (Some(cache), Some(file)) = (&cache, &cache_file) {
-        cache.finish(&args.directory, !outcome.cancelled);
+        // Only a whole folder tells which cached files are gone.
+        cache.finish(&root, args.from_list.is_none() && !outcome.cancelled);
         // A cache that cannot be written only costs speed next time.
         let _ = cache.save(file);
     }
@@ -364,6 +447,29 @@ mod tests {
             CacheChoice::File(PathBuf::from("c.json")),
             "options may come before the folder"
         );
+    }
+
+    #[test]
+    fn the_filter_and_the_list_are_read() {
+        let parsed = scan(&[
+            "scan",
+            "/lib",
+            "--exclude-ext",
+            ".WebM",
+            "--exclude",
+            "NCOP, NCED",
+        ]);
+        assert_eq!(parsed.filter.extensions, vec!["mp4", "mkv"]);
+        assert_eq!(parsed.filter.excluded_names, vec!["NCOP", "NCED"]);
+        let listed = scan(&["scan", "--from-list", "todo.csv"]);
+        assert_eq!(listed.from_list, Some(PathBuf::from("todo.csv")));
+        for bad in [
+            &["scan", "/a", "--from-list", "x.txt"][..],
+            &["scan", "/a", "--exclude-ext", "avi"][..],
+            &["scan", "/a", "--exclude-ext", "mp4,mkv,webm"][..],
+        ] {
+            assert!(parse(&args(bad)).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

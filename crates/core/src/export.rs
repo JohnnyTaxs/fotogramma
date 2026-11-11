@@ -1,7 +1,9 @@
 //! Lists of videos for other tools: plain paths, CSV, or JSON.
 
 use crate::scanner::VideoInfo;
+use crate::tr;
 use serde::Serialize;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -125,6 +127,96 @@ pub fn render(videos: &[VideoInfo], format: Format) -> String {
     }
 }
 
+/// The records of a CSV text, with quoted fields that may hold commas,
+/// quotes and line breaks.
+fn csv_records(text: &str) -> Vec<Vec<String>> {
+    let mut records = Vec::new();
+    let mut record = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if quoted {
+            match c {
+                '"' if chars.peek() == Some(&'"') => {
+                    field.push('"');
+                    chars.next();
+                }
+                '"' => quoted = false,
+                _ => field.push(c),
+            }
+            continue;
+        }
+        match c {
+            '"' => quoted = true,
+            ',' => record.push(std::mem::take(&mut field)),
+            '\r' => {}
+            '\n' => {
+                record.push(std::mem::take(&mut field));
+                records.push(std::mem::take(&mut record));
+            }
+            _ => field.push(c),
+        }
+    }
+    if !field.is_empty() || !record.is_empty() {
+        record.push(field);
+        records.push(record);
+    }
+    records
+}
+
+/// Undo what [`csv_field`] did to a value a spreadsheet would read as a formula.
+fn undefuse(text: String) -> String {
+    match text.strip_prefix('\'') {
+        Some(rest) if rest.starts_with(['=', '+', '-', '@', '\t', '\r']) => rest.to_string(),
+        _ => text,
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PathRow {
+    path: String,
+}
+
+/// The paths of a list this program exported, in any of its formats, without
+/// duplicates and in their original order.
+pub fn read_paths(text: &str, format: Format) -> Result<Vec<PathBuf>, String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let paths: Vec<String> = match format {
+        Format::Paths => text.lines().map(|line| line.trim().to_string()).collect(),
+        Format::Json => serde_json::from_str::<Vec<PathRow>>(text)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|row| row.path)
+            .collect(),
+        Format::Csv => {
+            let mut records = csv_records(text).into_iter();
+            let header = records.next().unwrap_or_default();
+            let column = header
+                .iter()
+                .position(|name| name.trim().eq_ignore_ascii_case("path"))
+                .ok_or_else(|| {
+                    tr!(
+                        "Il file CSV non ha una colonna \"path\".",
+                        "The CSV file has no \"path\" column."
+                    )
+                })?;
+            records
+                .filter_map(|mut record| {
+                    (column < record.len()).then(|| undefuse(record.swap_remove(column)))
+                })
+                .collect()
+        }
+    };
+    let mut seen = std::collections::HashSet::new();
+    Ok(paths
+        .into_iter()
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from)
+        .filter(|path| seen.insert(path.clone()))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +289,36 @@ mod tests {
         ]);
         assert_eq!(text, "/a.mkv\n/b.mkv\n");
         assert_eq!(render(&[], Format::Paths), "\n");
+    }
+
+    #[test]
+    fn every_exported_format_reads_back() {
+        let videos = [
+            video("/lib/=cmd, \"x\".mkv", "h264", 1, 1.0),
+            video("/lib/line\nbreak.mkv", "h264", 1, 1.0),
+            video("/lib/b.mkv", "h264", 1, 1.0),
+            video("/lib/b.mkv", "h264", 1, 1.0),
+        ];
+        let expected: Vec<PathBuf> = ["/lib/=cmd, \"x\".mkv", "/lib/line\nbreak.mkv", "/lib/b.mkv"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        for format in [Format::Csv, Format::Json] {
+            assert_eq!(
+                read_paths(&render(&videos, format), format).unwrap(),
+                expected
+            );
+        }
+        let defused = to_csv(&[video("=1+1", "h264", 1, 1.0)]);
+        assert_eq!(
+            read_paths(&defused, Format::Csv).unwrap(),
+            vec![PathBuf::from("=1+1")]
+        );
+        assert_eq!(
+            read_paths("\u{feff}/a.mkv\r\n\n  /b.mkv \n/a.mkv\n", Format::Paths).unwrap(),
+            vec![PathBuf::from("/a.mkv"), PathBuf::from("/b.mkv")]
+        );
+        assert!(read_paths("name,size\nx,1\n", Format::Csv).is_err());
+        assert!(read_paths("not json", Format::Json).is_err());
     }
 }

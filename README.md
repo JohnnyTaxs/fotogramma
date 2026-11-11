@@ -41,7 +41,8 @@ Fotogramma is the one that shows you the library first (what is not H.265, how m
 ## Features
 
 - Native desktop window for macOS, Windows, and Linux.
-- Recursive discovery of `.mp4`, `.mkv`, and `.webm` files.
+- Recursive discovery of `.mp4`, `.mkv`, and `.webm` files, with optional exclusions by extension or by words in the file name (openings, endings, trailers).
+- **Import a list** exported earlier (TXT, CSV or JSON): its videos are read again with `ffprobe`, so the table shows them as they are now, and files that are gone show up as unreadable.
 - Clear grouping into **to convert**, **already compatible** (HEVC and AV1 by default), and **unreadable** files.
 - Statistics, filters, search, sortable columns, and multi-file selection, with a **Select all** button for everything convertible in the current view.
 - **Convert selected** runs FFmpeg directly with readable presets and a custom mode.
@@ -50,7 +51,7 @@ Fotogramma is the one that shows you the library first (what is not H.265, how m
 - **Made for big libraries:** a scan cache (a rescan reads only the files that changed), up to 8 `ffprobe` threads, a **Bitrate** column to sort by what has the most to gain, and CSV or JSON export.
 - **Keeps long jobs safe:** the queue is saved while it runs and can be resumed after a crash, paused, ordered (largest or smallest first), and followed by sleep or shutdown; the computer is kept awake meanwhile. Stopping it says so ("Conversion stopped"), and the file you stopped is not counted as an error.
 - **Smarter conversions:** subtitles that do not fit MP4 send the file to MKV, HDR sources are never processed in 8 bits, results that save too little are dropped, converted files keep the date of the original, and the progress shows the time left.
-- **A normal application menu:** on macOS the native menu bar (Fotogramma, File, Edit, View, Window, Help), on Windows and Linux a menu bar in the window, with the same entries and shortcuts: `Ctrl/Cmd+O` choose a folder, `R` scan, `E` export, `Enter` convert the selection, `Shift+A` select all to convert, `F` search, `1`–`4` filters, `,` settings, `W` close the window, `Q` quit. Entries are greyed out when they cannot work.
+- **A normal application menu:** on macOS the native menu bar (Fotogramma, File, Edit, View, Window, Help), on Windows and Linux a menu bar in the window, with the same entries and shortcuts: `Ctrl/Cmd+O` choose a folder, `R` scan, `I` import a list, `E` export, `Enter` convert the selection, `Shift+A` select all to convert, `F` search, `1`–`4` filters, `,` settings, `W` close the window, `Q` quit. Entries are greyed out when they cannot work.
 - **Conversion in the background:** the progress window can be minimized to a bar at the bottom, and while it runs you can choose more videos and add them to the queue (they run one batch after the other, never in parallel). Stop ends the whole queue.
 - **Early stop and advice:** a file that is clearly heading for a result larger than the original (or than the minimum saving allows) is stopped after the first 10% instead of hours later, and the original is kept. The conversion window also suggests a CRF from how compressed the selected files already are (a remux that is already at 5 Mb/s needs a higher CRF than a huge one), with a button to apply it, and a **Which profile to choose?** table with the time, file size and use of each profile.
 - **A little easter egg:** a chibi girl runs along the progress bar towards a switched-off TV. She stays on top of the bar's fill and never gets to the TV while the conversion runs (not even at 100% of a file); when it has really finished she reaches it and the TV turns on. She is original pixel art drawn in code by `deployment/make_mascot.py`, and can be switched off in Settings.
@@ -83,6 +84,7 @@ Open **Settings** (*Impostazioni* in Italian) from the header. Changes apply imm
 - **Stop files that would end up larger than the original** (on by default): after the first 10% of a file the size written so far gives a projection; if it is clearly too big, that file is stopped and the original kept.
 - **The mascot** on the progress bar (on by default).
 - **Remember results for faster scans:** the scan cache, with a button to clear it.
+- **Scanned extensions** (MP4, MKV, WebM, all on by default) and **Leave out files whose name contains**: comma-separated words such as `NCOP, NCED, trailer`, in any case. Only the file name counts, not the folders. Both apply from the next scan and to imported lists.
 - **Updates:** check at startup (off until you agree to it at the first start), or check now.
 
 ## Conversion presets
@@ -167,6 +169,8 @@ On Windows, run `fotogramma.exe` inside the extracted folder. On Linux, run the 
 fotogramma-cli scan /path/to/library                     # one path per line
 fotogramma-cli scan /path/to/library -f csv --only all -o library.csv
 fotogramma-cli scan /path/to/library --codecs hevc,av1,h264 --fail-if-convert
+fotogramma-cli scan /path/to/library --exclude-ext webm --exclude NCOP,NCED
+fotogramma-cli scan --from-list library.csv              # read an exported list again
 ```
 
 `--only` is `convert` (default), `compatible`, `error` or `all`; `-f` is `txt`, `csv` or `json`. It shares the scan cache with the app, so a scan from the shell makes the next one in the app fast. The exit code is 0, 1 when `--fail-if-convert` finds something to convert, or 2 on an error. `fotogramma-cli --help` shows the rest.
@@ -177,7 +181,7 @@ If you agreed to it at the first start (or in Settings), Fotogramma asks GitHub 
 
 1. downloads the archive for your system from this repository's release;
 2. refuses it unless its SHA-256 matches `SHA256SUMS.txt`, published with every release (and, on macOS, unless the code signature is valid);
-3. after you quit, swaps the installed copy for the new one, keeps the old one if anything fails, and starts the new version.
+3. after you quit, swaps the installed copy for the new one, keeps the old one if anything fails, and starts the new version. If a file of the old copy is still locked (on Windows, by the process that just quit or by an antivirus scan), the `.fotogramma-old` folder it leaves is removed at the next start.
 
 It needs write access to the folder that holds the app; otherwise the window shows the release page to download by hand. A copy started with `cargo run` is never replaced. **Settings → Updates** turns the startup check on or off, or checks right away, and `FOTOGRAMMA_NO_UPDATE_CHECK=1` disables it for a single run. Releases up to 2.3.0 have no updater and no checksums: install 2.4.0 by hand once.
 

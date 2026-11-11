@@ -71,6 +71,8 @@ pub struct FotogrammaApp {
     scan_cancel: Option<Arc<AtomicBool>>,
     scan_receiver: Option<Receiver<ScanMessage>>,
     videos: Vec<VideoInfo>,
+    /// The list file the shown videos came from, instead of the folder.
+    imported_list: Option<String>,
     summary: Summary,
     warnings: Vec<DiscoveryWarning>,
     cancelled: bool,
@@ -161,6 +163,7 @@ impl FotogrammaApp {
             scan_cancel: None,
             scan_receiver: None,
             videos: Vec::new(),
+            imported_list: None,
             summary: Summary::default(),
             warnings: Vec::new(),
             cancelled: false,
@@ -474,6 +477,7 @@ impl FotogrammaApp {
         match action {
             MenuAction::ChooseFolder => self.browse_folder(),
             MenuAction::Scan => self.start_scan(ctx),
+            MenuAction::Import => self.import_list(ctx),
             MenuAction::Export => self.export_videos(),
             MenuAction::ConvertSelected => {
                 let selected = self.selected_videos();
@@ -541,20 +545,102 @@ impl FotogrammaApp {
         self.folder_error = None;
         self.settings.directory = directory.clone();
         self.settings.save();
+        self.imported_list = None;
+        let options = self.begin_scan();
+        let cancel = self.scan_cancel.clone().unwrap_or_default();
+        self.scan_receiver = Some(worker::spawn_scan(path, options, cancel, ctx.clone()));
+        ctx.request_repaint();
+    }
+
+    /// Clear the previous library and get ready for the results of a scan or
+    /// of an imported list.
+    fn begin_scan(&mut self) -> worker::ScanOptions {
+        self.clear_results();
         self.scanning = true;
         self.scan_progress = Some((0, None, String::new()));
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.scan_cancel = Some(cancel.clone());
-        let options = worker::ScanOptions {
+        self.scan_cancel = Some(Arc::new(AtomicBool::new(false)));
+        worker::ScanOptions {
             cache_file: if self.settings.scan_cache {
                 crate::settings::cache_file()
             } else {
                 None
             },
             output_dir: self.settings.output_dir.clone(),
+            filter: self.settings.scan_filter(),
+        }
+    }
+
+    /// Ask for a list exported earlier and probe its videos again.
+    fn import_list(&mut self, ctx: &egui::Context) {
+        if self.scanning {
+            return;
+        }
+        let Some(file) = rfd::FileDialog::new()
+            .set_title(tr_str("Importa elenco", "Import list"))
+            .set_directory(home_directory())
+            .add_filter(
+                tr_str("Elenco di Fotogramma", "Fotogramma list"),
+                &["txt", "csv", "json"],
+            )
+            .pick_file()
+        else {
+            return;
         };
-        self.scan_receiver = Some(worker::spawn_scan(path, options, cancel, ctx.clone()));
+        self.start_import(&file, ctx);
+    }
+
+    fn start_import(&mut self, file: &std::path::Path, ctx: &egui::Context) {
+        let format = Format::from_extension(
+            &file
+                .extension()
+                .map(|extension| extension.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        );
+        let paths = std::fs::read_to_string(file)
+            .map_err(|error| error.to_string())
+            .and_then(|text| export::read_paths(&text, format));
+        let paths = match paths {
+            Ok(paths) if !paths.is_empty() => paths,
+            Ok(_) => {
+                self.set_status(
+                    tr_str(
+                        "L’elenco non contiene percorsi.",
+                        "The list contains no paths.",
+                    ),
+                    Duration::from_secs(6),
+                );
+                return;
+            }
+            Err(error) => {
+                self.set_status(
+                    fotogramma_core::tr!(
+                        "Importazione non riuscita: {error}",
+                        "Import failed: {error}"
+                    ),
+                    Duration::from_secs(7),
+                );
+                return;
+            }
+        };
+        self.folder_error = None;
+        self.imported_list = Some(file.display().to_string());
+        let options = self.begin_scan();
+        let cancel = self.scan_cancel.clone().unwrap_or_default();
+        self.scan_receiver = Some(worker::spawn_import(paths, options, cancel, ctx.clone()));
         ctx.request_repaint();
+    }
+
+    /// Forget the previous library, so nothing acts on it while a new scan runs.
+    fn clear_results(&mut self) {
+        self.videos.clear();
+        self.summary = Summary::default();
+        self.warnings.clear();
+        self.cancelled = false;
+        self.selected.clear();
+        self.converted.clear();
+        self.selection_anchor = None;
+        self.details = None;
+        self.page = Page::Welcome;
     }
 
     fn cancel_scan(&mut self) {
@@ -1031,12 +1117,9 @@ impl FotogrammaApp {
             ui.set_width(ui.available_width());
             ui.label(RichText::new(tr_str("Cartella della libreria", "Library folder")).strong());
             ui.label(
-                RichText::new(tr_str(
-                    "Analisi ricorsiva di MP4, MKV e WebM. Nessuna modifica ai file.",
-                    "Recursive scan of MP4, MKV and WebM. No file is modified.",
-                ))
-                .small()
-                .color(theme::MUTED),
+                RichText::new(scan_description(&self.settings))
+                    .small()
+                    .color(theme::MUTED),
             );
             ui.add_space(2.0);
             let mut browse = false;
@@ -1230,8 +1313,14 @@ impl FotogrammaApp {
                         .size(theme::PAGE_TITLE_SIZE)
                         .strong(),
                 );
+                let source = match &self.imported_list {
+                    Some(file) => {
+                        fotogramma_core::tr!("Elenco importato: {file}", "Imported list: {file}")
+                    }
+                    None => self.settings.directory.clone(),
+                };
                 ui.label(
-                    RichText::new(&self.settings.directory)
+                    RichText::new(source)
                         .font(theme::mono(10.0))
                         .color(theme::MUTED),
                 );
@@ -1598,7 +1687,10 @@ impl FotogrammaApp {
             return;
         }
         let Some(target) = rfd::FileDialog::new()
-            .set_file_name("fotogramma-da-convertire.txt")
+            .set_file_name(tr_str(
+                "fotogramma-da-convertire.txt",
+                "fotogramma-to-convert.txt",
+            ))
             .set_directory(home_directory())
             .add_filter(tr_str("Elenco di percorsi", "List of paths"), &["txt"])
             .add_filter("CSV", &["csv"])
@@ -1849,6 +1941,34 @@ fn engine_status() -> (String, bool) {
     }
 }
 
+/// The line under "Library folder": which extensions the scan reads, and
+/// how many names the settings leave out.
+fn scan_description(settings: &Settings) -> String {
+    let labels: Vec<&str> = [("mp4", "MP4"), ("mkv", "MKV"), ("webm", "WebM")]
+        .into_iter()
+        .filter(|(key, _)| settings.scan_extensions.iter().any(|value| value == key))
+        .map(|(_, label)| label)
+        .collect();
+    let and = tr_str(" e ", " and ");
+    let list = match labels.as_slice() {
+        [] => String::new(),
+        [only] => only.to_string(),
+        [first @ .., last] => format!("{}{and}{last}", first.join(", ")),
+    };
+    let mut text = fotogramma_core::tr!(
+        "Analisi ricorsiva di {list}. Nessuna modifica ai file.",
+        "Recursive scan of {list}. No file is modified."
+    );
+    if !settings.excluded_names.is_empty() {
+        text.push_str(&fotogramma_core::tr!(
+            " Nomi esclusi: {}",
+            " Excluded names: {}",
+            settings.excluded_names.join(", ")
+        ));
+    }
+    text
+}
+
 fn home_directory() -> PathBuf {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -2024,7 +2144,7 @@ mod snapshot_tests {
         }
     }
 
-    fn demo_video(
+    pub(super) fn demo_video(
         name: &str,
         codec: &str,
         category: Category,
@@ -2162,7 +2282,7 @@ mod snapshot_tests {
 
 #[cfg(test)]
 mod small_snapshot_tests {
-    use super::snapshot_tests::{demo_app, lang_guard};
+    use super::snapshot_tests::{demo_app, demo_video, lang_guard};
     use super::*;
 
     #[test]
@@ -2614,6 +2734,146 @@ mod small_snapshot_tests {
         );
         app.handle_menu_action(MenuAction::Scan, &ctx);
         assert!(!app.scanning);
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let directory =
+            std::env::temp_dir().join(format!("fotogramma-app-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    /// Poll the scan until it ends, as the frames would.
+    fn finish_scan(app: &mut FotogrammaApp, ctx: &egui::Context) {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while app.scanning && Instant::now() < deadline {
+            app.poll_scan(ctx);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!app.scanning, "the scan ended");
+    }
+
+    #[test]
+    fn a_new_scan_drops_the_previous_library_at_once() {
+        let _lang = lang_guard();
+        let folder = scratch("rescan");
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let ctx = harness.ctx.clone();
+        let app = harness.state_mut();
+        app.selected.insert(PathBuf::from("/Filmati/Tramonto.mkv"));
+        app.directory = folder.to_string_lossy().into_owned();
+        app.start_scan(&ctx);
+        assert!(app.scanning);
+        assert!(app.videos.is_empty(), "nothing of the old library is left");
+        assert_eq!(app.summary, Summary::default());
+        assert!(app.selected.is_empty());
+        assert_eq!(app.page, Page::Welcome);
+        assert!(!app.menu_state().can_export);
+        finish_scan(app, &ctx);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn an_imported_list_is_probed_again_and_filtered() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        if fotogramma_core::media_tools::ffprobe_path().is_err() {
+            return;
+        }
+        let folder = scratch("import");
+        let list = folder.join("todo.csv");
+        let gone = folder.join("Show").join("gone.mkv");
+        let skipped = folder.join("Show").join("Show NCOP.mkv");
+        let opening = folder.join("Show").join("op.webm");
+        std::fs::write(
+            &list,
+            export::to_csv(&[
+                VideoInfo {
+                    path: gone.clone(),
+                    ..demo_video("gone.mkv", "h264", Category::Convert, 1, 1.0, None)
+                },
+                VideoInfo {
+                    path: skipped,
+                    ..demo_video("Show NCOP.mkv", "h264", Category::Convert, 1, 1.0, None)
+                },
+                VideoInfo {
+                    path: opening,
+                    ..demo_video("op.webm", "h264", Category::Convert, 1, 1.0, None)
+                },
+            ]),
+        )
+        .unwrap();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let ctx = harness.ctx.clone();
+        let app = harness.state_mut();
+        app.settings.scan_extensions = vec!["mkv".to_string(), "mp4".to_string()];
+        app.settings.excluded_names = vec!["ncop".to_string()];
+        app.start_import(&list, &ctx);
+        assert!(app.videos.is_empty(), "the demo library is gone");
+        finish_scan(app, &ctx);
+        assert_eq!(app.page, Page::Results);
+        assert_eq!(app.videos.len(), 1, "the opening and the NCOP are left out");
+        assert_eq!(app.videos[0].path, gone);
+        assert_eq!(
+            app.videos[0].category,
+            Category::Error,
+            "a file that is gone"
+        );
+        harness.run();
+        harness.get_by_label_contains("Elenco importato:");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn the_scan_line_names_only_the_included_extensions() {
+        let _lang = lang_guard();
+        let mut settings = Settings::default();
+        assert_eq!(
+            scan_description(&settings),
+            "Analisi ricorsiva di MP4, MKV e WebM. Nessuna modifica ai file."
+        );
+        settings.scan_extensions = vec!["mkv".to_string(), "mp4".to_string()];
+        settings.excluded_names = vec!["NCOP".to_string(), "NCED".to_string()];
+        set_lang(Lang::En);
+        assert_eq!(
+            scan_description(&settings),
+            "Recursive scan of MP4 and MKV. No file is modified. Excluded names: NCOP, NCED"
+        );
+    }
+
+    #[test]
+    fn the_settings_edit_the_scan_filter() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1280.0, 820.0))
+            .build_eframe(|cc| {
+                let mut app = demo_app(cc);
+                app.show_settings = true;
+                app
+            });
+        harness.run();
+        // The section is below the fold: accesskit clicks wherever it is.
+        harness.get_by_label("WebM").click_accesskit();
+        harness.run();
+        harness
+            .get_by_label("Escludi i file il cui nome contiene")
+            .focus();
+        harness.run();
+        harness
+            .get_by_label("Escludi i file il cui nome contiene")
+            .type_text("NCOP, NCED");
+        harness.run();
+        let settings = &harness.state().settings;
+        assert_eq!(settings.scan_extensions, vec!["mp4", "mkv"]);
+        assert_eq!(settings.excluded_names, vec!["NCOP", "NCED"]);
     }
 
     #[test]
