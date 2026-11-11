@@ -10,7 +10,7 @@
 # Usage:
 #   deployment/ffmpeg/build_x265.sh [prefix]
 #
-# Must run on the target system (or inside MSYS2 MINGW64 on Windows) with
+# Must run on the target system (or inside MSYS2 UCRT64 on Windows) with
 # cmake, a C++ compiler, nasm, and curl. On Windows it also needs git: x265's
 # Version.cmake reads x265Version.txt through Git, and without it the release
 # tag stays empty and the resource-compiler configuration fails.

@@ -7,7 +7,7 @@ The workflow `.github/workflows/build-release.yml` runs on every push to `main`,
 | Job | Runner | Output |
 | --- | --- | --- |
 | Linux | `ubuntu-latest` | `Fotogramma-Linux-x86_64.zip` |
-| Windows | `windows-latest` (MSYS2 MINGW64 for FFmpeg) | `Fotogramma-Windows-amd64.zip` |
+| Windows | `windows-latest` (MSYS2 UCRT64 for FFmpeg) | `Fotogramma-Windows-amd64.zip` |
 | macOS ARM | `macos-15` | `Fotogramma-Darwin-arm64.zip` |
 
 **macOS Intel is intentionally excluded.** Architecture names come from `platform.machine()` during the build, so archive names change only if a runner changes. Releases are never cross-compiled: each job builds and packages on its own operating system.
@@ -20,7 +20,7 @@ The workflow `.github/workflows/build-release.yml` runs on every push to `main`,
 4. Platform build dependencies:
    - Linux: `build-essential`, `pkg-config`, `nasm`, `cmake`, `patchelf`, OpenGL, Mesa drivers (for the headless wgpu snapshots), X11, xkbcommon, and Wayland development packages.
    - macOS ARM: `x265` and `pkgconf` through Homebrew.
-   - Windows: MSYS2 with `mingw-w64-x86_64-toolchain`, `nasm`, `cmake`, and `pkgconf`.
+   - Windows: MSYS2 UCRT64 with `mingw-w64-ucrt-x86_64-toolchain`, `nasm`, `cmake`, and `pkgconf`.
 5. `deployment/ffmpeg/build_minimal.sh` (or `build_minimal_windows.sh`) downloads FFmpeg 9.0.2, configures the minimal component list, builds it, and collects the relocatable toolchain into `deployment/vendor/rust/<System>-<arch>/`. Linux and Windows first call `deployment/ffmpeg/build_x265.sh`, which builds a slim 8-bit + 10-bit x265 with a static C++ runtime instead of using the distribution package.
 6. `cargo clippy --workspace --all-targets --locked -- -D warnings` (Linux job), then `cargo test --workspace --locked --no-fail-fast` (every job, so one run shows all failures).
 7. The two real-pipeline tests again with `FOTOGRAMMA_FFMPEG_DIR` pointing at the freshly built tools.

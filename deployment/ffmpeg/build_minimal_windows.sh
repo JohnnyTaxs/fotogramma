@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Build the minimal FFmpeg used by the Windows application.
 #
-# Must run inside an MSYS2 MINGW64 shell with:
-#   make, cmake, mingw-w64-x86_64-toolchain, mingw-w64-x86_64-nasm,
-#   mingw-w64-x86_64-pkgconf
+# Must run inside an MSYS2 UCRT64 shell with:
+#   make, cmake, mingw-w64-ucrt-x86_64-toolchain, mingw-w64-ucrt-x86_64-nasm,
+#   mingw-w64-ucrt-x86_64-pkgconf
 #
 # x265 is built from source (see build_x265.sh) because the MSYS2 package
 # carries all three bit depths and is 22 MB; the application only encodes

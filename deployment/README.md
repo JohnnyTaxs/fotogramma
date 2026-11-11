@@ -6,7 +6,7 @@
 - Python 3.10+ for the packaging and collector scripts;
 - on macOS: Xcode command line tools, `pkgconf`, and `x265` from Homebrew;
 - on Linux: `build-essential`, `pkg-config`, `nasm`, `cmake`, `patchelf`, plus the X11/Wayland/OpenGL development packages listed in the CI workflow;
-- on Windows: MSYS2 MINGW64 with `mingw-w64-x86_64-toolchain`, `nasm`, `cmake`, `pkgconf`, and the MSVC Rust toolchain on the host.
+- on Windows: MSYS2 UCRT64 with `mingw-w64-ucrt-x86_64-toolchain`, `nasm`, `cmake`, `pkgconf`, and the MSVC Rust toolchain on the host.
 
 None of these are required on the destination computer.
 
@@ -18,7 +18,7 @@ FFmpeg is no longer downloaded as a large community archive. It is built from th
 # macOS and Linux
 deployment/ffmpeg/build_minimal.sh
 
-# Windows, inside an MSYS2 MINGW64 shell
+# Windows, inside an MSYS2 UCRT64 shell
 deployment/ffmpeg/build_minimal_windows.sh
 ```
 
