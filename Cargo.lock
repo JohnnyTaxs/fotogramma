@@ -1255,7 +1255,7 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "fotogramma"
-version = "2.11.4"
+version = "2.12.0"
 dependencies = [
  "eframe",
  "egui_extras",
@@ -1275,7 +1275,7 @@ dependencies = [
 
 [[package]]
 name = "fotogramma-core"
-version = "2.11.4"
+version = "2.12.0"
 dependencies = [
  "serde",
  "serde_json",
