@@ -8,7 +8,9 @@ use fotogramma_core::conversion::{
 };
 use fotogramma_core::media_tools::{ffmpeg_path, ffprobe_path, prepare_command};
 use fotogramma_core::scanner::{probe_video, Category};
-use fotogramma_core::verification::{replace_verified_output, validate_conversion_output};
+use fotogramma_core::verification::{
+    replace_verified_output, validate_conversion_output, validate_conversion_output_with_progress,
+};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -121,6 +123,34 @@ fn converts_a_short_h264_to_hevc_without_touching_the_original() {
 
     let (valid, message) = validate_conversion_output(&info, &output, &ffprobe, &ffmpeg);
     assert!(valid, "validation failed: {message}");
+
+    // The full decode reports how far it is, for the time left.
+    let mut decoded = Vec::new();
+    let (valid, message) = validate_conversion_output_with_progress(
+        &info,
+        &output,
+        &ffprobe,
+        &ffmpeg,
+        None,
+        &mut |seconds| decoded.push(seconds),
+    );
+    assert!(valid, "validation with progress failed: {message}");
+    assert!(
+        decoded.last().is_some_and(|seconds| *seconds > 1.5),
+        "decode progress: {decoded:?}"
+    );
+
+    // Stopped before it starts: the check fails and says so.
+    let stop = std::sync::atomic::AtomicBool::new(true);
+    let (valid, _) = validate_conversion_output_with_progress(
+        &info,
+        &output,
+        &ffprobe,
+        &ffmpeg,
+        Some(&stop),
+        &mut |_| {},
+    );
+    assert!(!valid);
 
     let converted = probe_video(&output, &directory, &ffprobe, None).expect("probe output");
     assert_eq!(converted.category, Category::Compatible);

@@ -14,7 +14,7 @@ use fotogramma_core::queue::PendingQueue;
 use fotogramma_core::scanner::{discover_videos, probe_videos_cached, DiscoveryWarning, VideoInfo};
 use fotogramma_core::update::{self, InstallTarget, Release};
 use fotogramma_core::verification::{
-    replace_verified_output, subtitle_codecs, validate_conversion_output,
+    replace_verified_output, subtitle_codecs, validate_conversion_output_with_progress,
 };
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
@@ -246,6 +246,13 @@ pub enum ConversionMessage {
     VerificationStarted {
         index: usize,
         current_file: PathBuf,
+    },
+    /// The full decode before replacement, with the seconds left for it.
+    VerificationProgress {
+        index: usize,
+        percent: u8,
+        current_file: PathBuf,
+        eta: Option<u64>,
     },
     FileCompleted(Box<ConversionResult>),
     Completed(Vec<ConversionResult>),
@@ -668,8 +675,52 @@ fn convert_one(
                 return ConversionResult::failure(&video.path, destination, error);
             }
         };
-        let (valid, validation_message) =
-            validate_conversion_output(video, destination, &ffprobe, ffmpeg);
+        let verification_started = std::time::Instant::now();
+        let mut last_sent: Option<std::time::Instant> = None;
+        let (valid, validation_message) = validate_conversion_output_with_progress(
+            video,
+            destination,
+            &ffprobe,
+            ffmpeg,
+            Some(cancel.as_ref()),
+            &mut |decoded| {
+                let Some(duration) = video.duration.filter(|value| *value > 0.0) else {
+                    return;
+                };
+                // Decoding is fast: a few updates a second are enough.
+                if last_sent.is_some_and(|time| time.elapsed() < Duration::from_millis(250)) {
+                    return;
+                }
+                last_sent = Some(std::time::Instant::now());
+                let percent = ((decoded / duration) * 100.0).round().clamp(0.0, 99.0) as u8;
+                let _ = sender.send(ConversionMessage::VerificationProgress {
+                    index: file_index,
+                    percent,
+                    current_file: video.path.clone(),
+                    eta: estimate_seconds_left(
+                        decoded,
+                        verification_started.elapsed().as_secs_f64(),
+                        (duration - decoded).max(0.0),
+                    ),
+                });
+                ctx.request_repaint();
+            },
+        );
+        if cancel.load(Ordering::Relaxed) {
+            let _ = std::fs::remove_file(destination);
+            return ConversionResult {
+                source: video.path.clone(),
+                destination: destination.to_path_buf(),
+                success: false,
+                message: tr_str("Conversione interrotta", "Conversion stopped").to_string(),
+                cancelled: true,
+                verified: false,
+                replaced: false,
+                original_size: None,
+                new_size: None,
+                skipped: false,
+            };
+        }
         if !valid {
             let _ = std::fs::remove_file(destination);
             return ConversionResult::failure(

@@ -93,7 +93,7 @@ The **Custom** profile can be saved under a name (up to 40 characters) and appea
 
 | Preset | Intended use | Video settings | Default audio |
 | --- | --- | --- | --- |
-| Maximum quality and compression | Smallest file at this quality; very slow (about 6x Intermediate) | CRF 20, `veryslow`, AQ mode 3, 10-bit | Original |
+| Maximum quality and compression | Most detail; not a smaller file than High quality (at the same CRF, `veryslow` keeps more grain and can come out larger); very slow (about 6x Intermediate) | CRF 20, `veryslow`, AQ mode 3, 10-bit | Original |
 | High quality · recommended for the archive | Nearly the same quality as Maximum in about a third of the time | CRF 20, `slow`, AQ mode 3, 10-bit | Original |
 | Intermediate · good quality | Balanced quality, size, and speed | CRF 22, `medium`, 10-bit | Original |
 | Fast · quick transcode | Maximum transcoding speed | CRF 26, `ultrafast`, 8-bit | Original |
@@ -122,7 +122,7 @@ The default output is a new `.h265.mkv` or `.h265.mp4` file with a numeric suffi
 1. Output codec is HEVC.
 2. Duration matches within 1% or 1 second.
 3. Audio, video, subtitle, and data stream counts match.
-4. Full decode succeeds with `ffmpeg -v error -i output -f null -`.
+4. Full decode succeeds with `ffmpeg -v error -i output -f null -` (the progress window shows its percentage and the time left, and Stop interrupts it).
 5. The replacement passes a final codec check before the temporary backup is deleted.
 
 If any check fails, the original remains unchanged. Replacement uses an atomic rename on the same filesystem and a `.fotogramma-backup` file that is removed only after success. The container must match the original extension (MKV or MP4); WebM replacement is not supported.

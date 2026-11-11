@@ -3,8 +3,13 @@
 use crate::media_tools::{ffprobe_path, prepare_command};
 use crate::scanner::{probe_video, stream_categories, VideoInfo};
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 pub fn stream_counts(
     path: &Path,
@@ -85,6 +90,19 @@ pub fn validate_conversion_output(
     ffprobe: &Path,
     ffmpeg: &Path,
 ) -> (bool, String) {
+    validate_conversion_output_with_progress(original, output, ffprobe, ffmpeg, None, &mut |_| {})
+}
+
+/// The same checks, reporting the seconds of video decoded so far through
+/// `on_progress`; setting `cancel` kills the decode and fails the check.
+pub fn validate_conversion_output_with_progress(
+    original: &VideoInfo,
+    output: &Path,
+    ffprobe: &Path,
+    ffmpeg: &Path,
+    cancel: Option<&AtomicBool>,
+    on_progress: &mut dyn FnMut(f64),
+) -> (bool, String) {
     let parent = output.parent().unwrap_or_else(|| Path::new("."));
     let metadata = match probe_video(output, parent, ffprobe, None) {
         Ok(metadata) => metadata,
@@ -159,6 +177,8 @@ pub fn validate_conversion_output(
         .arg("-v")
         .arg("error")
         .arg("-nostats")
+        .arg("-progress")
+        .arg("pipe:1")
         .arg("-i")
         .arg(output)
         .arg("-f")
@@ -167,8 +187,8 @@ pub fn validate_conversion_output(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let result = match command.output() {
-        Ok(result) => result,
+    let mut child = match command.spawn() {
+        Ok(child) => child,
         Err(error) => {
             return (
                 false,
@@ -179,11 +199,70 @@ pub fn validate_conversion_output(
             );
         }
     };
-    if !result.status.success() {
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        let stdout = String::from_utf8_lossy(&result.stdout);
-        let text = format!("{stderr}{stdout}");
-        let last = text.lines().last().map(|line| line.trim()).unwrap_or("");
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
+    let (line_sender, line_receiver) = mpsc::channel::<String>();
+    let reader = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if line_sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let error_reader = thread::spawn(move || {
+        BufReader::new(stderr)
+            .lines()
+            .map_while(Result::ok)
+            .collect::<Vec<String>>()
+    });
+    let mut cancelled = false;
+    loop {
+        if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            let _ = child.kill();
+            cancelled = true;
+            break;
+        }
+        match line_receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(line) => {
+                // FFmpeg names it out_time_ms, but the value is in microseconds.
+                if let Some(value) = line.trim().strip_prefix("out_time_ms=") {
+                    if let Ok(micros) = value.parse::<f64>() {
+                        on_progress((micros / 1_000_000.0).max(0.0));
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let status = child.wait();
+    let _ = reader.join();
+    let stderr_lines = error_reader.join().unwrap_or_default();
+    if cancelled {
+        return (
+            false,
+            crate::i18n::tr_str("Verifica interrotta", "Verification interrupted").to_string(),
+        );
+    }
+    let status = match status {
+        Ok(status) => status,
+        Err(error) => {
+            return (
+                false,
+                crate::tr!(
+                    "Decodifica completa non riuscita: {error}",
+                    "Full decode failed: {error}"
+                ),
+            );
+        }
+    };
+    if !status.success() {
+        let last = stderr_lines
+            .iter()
+            .rev()
+            .map(|line| line.trim())
+            .find(|line| !line.is_empty())
+            .unwrap_or("");
         let details = if last.is_empty() {
             crate::i18n::tr_str("errore sconosciuto", "unknown error")
         } else {

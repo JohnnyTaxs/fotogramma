@@ -1144,6 +1144,28 @@ impl ConversionSession {
                         .to_string(),
                     );
                 }
+                ConversionMessage::VerificationProgress {
+                    index,
+                    percent,
+                    current_file,
+                    eta,
+                } => {
+                    let name = current_file
+                        .file_name()
+                        .map(|value| value.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    self.label = match eta {
+                        Some(seconds) => fotogramma_core::tr!(
+                            "Verifica completa · {index} · {name} · {percent}% · circa {} rimasti",
+                            "Full verification · {index} · {name} · {percent}% · about {} left",
+                            fotogramma_core::formatting::format_eta(seconds)
+                        ),
+                        None => fotogramma_core::tr!(
+                            "Verifica completa · {index} · {name} · {percent}%",
+                            "Full verification · {index} · {name} · {percent}%"
+                        ),
+                    };
+                }
                 ConversionMessage::FileCompleted(result) => {
                     let result = *result;
                     if result.cancelled {
@@ -2359,16 +2381,16 @@ fn profile_comparison(ui: &mut egui::Ui) {
             (
                 "max_quality",
                 tr_str("circa 6×", "about 6×"),
-                tr_str("il più piccolo", "the smallest"),
+                tr_str("come Alta, a volte più grande", "like High, sometimes larger"),
                 tr_str(
-                    "Solo se il tempo non conta: la differenza con Alta qualità è minima.",
-                    "Only if time does not matter: the difference from High quality is tiny.",
+                    "Solo se il tempo non conta: un po' più di dettaglio, non un file più piccolo.",
+                    "Only if time does not matter: a little more detail, not a smaller file.",
                 ),
             ),
             (
                 "high_quality",
                 tr_str("circa 2×", "about 2×"),
-                tr_str("quasi come il massimo", "almost as small as Maximum"),
+                tr_str("grande, tiene il dettaglio", "large, keeps the detail"),
                 tr_str(
                     "La scelta per un archivio: quasi la stessa qualità in un terzo del tempo.",
                     "The choice for an archive: nearly the same quality in a third of the time.",
@@ -2377,7 +2399,7 @@ fn profile_comparison(ui: &mut egui::Ui) {
             (
                 "balanced",
                 tr_str("1×", "1×"),
-                tr_str("più grande del massimo", "larger than Maximum"),
+                tr_str("più piccolo di Alta", "smaller than High"),
                 tr_str(
                     "Per molti file o poco tempo: buona qualità, file un po' meno compresso.",
                     "For many files or little time: good quality, a slightly less compressed file.",
@@ -2422,8 +2444,8 @@ fn profile_comparison(ui: &mut egui::Ui) {
         ui.add_space(4.0);
         ui.label(
             RichText::new(tr_str(
-                "Tempi indicativi rispetto a Intermedio: cambiano con il video e con il processore. Una conversione parte da una stima prudente che migliora dopo qualche minuto. Il CRF più basso dà più qualità e file più grande; il preset più lento comprime meglio a parità di qualità.",
-                "Times are indicative, relative to Intermediate: they change with the video and the processor. A conversion starts from a cautious estimate that improves after a few minutes. A lower CRF gives more quality and a larger file; a slower preset compresses better at the same quality.",
+                "Tempi indicativi rispetto a Intermedio: cambiano con il video e con il processore. Una conversione parte da una stima prudente che migliora dopo qualche minuto. Il CRF più basso dà più qualità e file più grande; il preset più lento, allo stesso CRF, tiene più dettaglio ma non dà per forza un file più piccolo: la dimensione la decide soprattutto il CRF.",
+                "Times are indicative, relative to Intermediate: they change with the video and the processor. A conversion starts from a cautious estimate that improves after a few minutes. A lower CRF gives more quality and a larger file; a slower preset, at the same CRF, keeps more detail but does not necessarily make a smaller file: the CRF is what mostly sets the size.",
             ))
             .small()
             .color(theme::MUTED),

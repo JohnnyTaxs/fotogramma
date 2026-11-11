@@ -179,8 +179,8 @@ pub fn builtin_profiles() -> Vec<ConversionProfile> {
         "max_quality",
         tr_str("Massima qualità e compressione", "Maximum quality and compression"),
         tr_str(
-            "Il file più piccolo possibile a questa qualità (CRF 20, preset veryslow, AQ mode 3, 10 bit). È molto lento: indicativamente il triplo di Alta qualità per risparmiare solo il 2-3% di spazio. Un film lungo può richiedere ore.",
-            "The smallest possible file at this quality (CRF 20, veryslow preset, AQ mode 3, 10-bit). It is very slow: roughly three times High quality to save only 2-3% of space. A long film can take hours.",
+            "La massima cura del dettaglio (CRF 20, preset veryslow, AQ mode 3, 10 bit). Non dà un file più piccolo di Alta qualità: con lo stesso CRF il preset veryslow conserva più dettaglio e grana, e il file può venire più grande. È molto lento, indicativamente il triplo di Alta qualità: un film lungo può richiedere ore.",
+            "The most care for detail (CRF 20, veryslow preset, AQ mode 3, 10-bit). It does not make a smaller file than High quality: at the same CRF the veryslow preset keeps more detail and grain, and the file can come out larger. It is very slow, roughly three times High quality: a long film can take hours.",
         ),
         20,
         "veryslow",

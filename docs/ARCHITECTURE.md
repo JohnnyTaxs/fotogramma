@@ -26,7 +26,7 @@ eframe + egui (glow / OpenGL)
 
 ## Workspace
 
-`Cargo.toml` defines a two-crate workspace, version `2.11.3`:
+`Cargo.toml` defines a two-crate workspace, version `2.11.4`:
 
 | Crate | Responsibility |
 | --- | --- |
@@ -113,7 +113,7 @@ One definition, two renderers. `MenuAction` lists what the menu can do; `menus(n
 
 Verified replacement has two separate phases:
 
-1. `validate_conversion_output()` checks HEVC, duration within max(1 second, 1%), matching stream counts, and a full decode using `ffmpeg -v error -i output -f null -`.
+1. `validate_conversion_output()` checks HEVC, duration within max(1 second, 1%), matching stream counts, and a full decode using `ffmpeg -v error -progress pipe:1 -i output -f null -`. `validate_conversion_output_with_progress()` reports the seconds decoded so far (the worker turns them into `VerificationProgress` with the percentage and the time left) and kills the decode when the cancel flag is set.
 2. `replace_verified_output()` renames the original to `.fotogramma-backup`, moves the `.partial` over the original path, checks the codec again, and only then deletes the backup.
 
 If any test fails, no replacement occurs. If the final check fails after renaming, the backup restores the original. On Windows, the failed output is removed before restoring because `rename` cannot replace an existing file.
@@ -130,7 +130,7 @@ A virtualized `egui_extras::TableBuilder` with six columns: Video, Codec, Durati
 
 ### `crates/app/src/worker.rs`
 
-`spawn_scan()` and `spawn_conversion()` return `mpsc::Receiver`s and request a repaint after every message. The scan worker sends `Progress`, `Completed`, and `Failed`. The conversion worker sends `FileStarted`, `Progress`, `VerificationStarted`, `FileCompleted`, and `ConversionCompleted`.
+`spawn_scan()` and `spawn_conversion()` return `mpsc::Receiver`s and request a repaint after every message. The scan worker sends `Progress`, `Completed`, and `Failed`. The conversion worker sends `FileStarted`, `Progress`, `VerificationStarted`, `VerificationProgress`, `FileCompleted`, and `ConversionCompleted`.
 
 Conversions run sequentially to avoid saturating CPU and disk. `stderr` is merged into `stdout`, `out_time_ms` is parsed for progress, and the pipe is closed after `wait()`.
 
