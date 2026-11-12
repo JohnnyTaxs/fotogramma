@@ -109,6 +109,8 @@ One definition, two renderers. `MenuAction` lists what the menu can do; `menus(n
 
 `ConversionResult` carries `original_size` (read before the conversion, so before any replacement) and `new_size` (read after it). `formatting::SpaceChange` adds up the files that succeeded and gives the saved or added bytes and the signed percentage. `ConversionSession` keeps the total in `space` once the queue ends; the progress dialog shows it, each log line carries the per-file figures, and closing the dialog leaves a line in the status bar.
 
+When the queue holds more than one file, the progress dialog offers **Show results**, which opens `results::show` over it: one row per finished file with its outcome, size before and after, and the saving, sortable by column (biggest saving first), and the total of the files that were kept. `advance_queue` hands the finished batch to the next one (`ConversionSession::continue_from`, into `history`), so the table covers the whole queue until the dialog is closed.
+
 ### `crates/core/src/verification.rs`
 
 Verified replacement has two separate phases:

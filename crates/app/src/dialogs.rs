@@ -999,7 +999,7 @@ fn quote(argument: &str) -> String {
     format!("'{}'", argument.replace('\'', "'\\''"))
 }
 
-fn modal_frame() -> egui::Frame {
+pub(crate) fn modal_frame() -> egui::Frame {
     egui::Frame::NONE
         .fill(theme::BG)
         .stroke(egui::Stroke::new(1.0, theme::LINE))
@@ -1027,6 +1027,11 @@ pub struct ConversionSession {
     pub after_handled: bool,
     /// The files of this batch, so they cannot be queued twice.
     pub sources: std::collections::HashSet<PathBuf>,
+    /// The results of the batches that ran before this one in the same queue.
+    pub history: Vec<ConversionResult>,
+    /// The table of the results is open over the progress window.
+    pub results_open: bool,
+    pub results_sort: crate::results::ResultSort,
 }
 
 /// `, 1,2 GB instead of 2,0 GB (-40%)` for one converted file.
@@ -1076,7 +1081,30 @@ impl ConversionSession {
             failed: false,
             space: None,
             after_handled: false,
+            history: Vec::new(),
+            results_open: false,
+            results_sort: crate::results::ResultSort::default(),
         }
+    }
+
+    /// Take over the results of the batch that ran before this one, so the
+    /// table covers the whole queue.
+    pub fn continue_from(&mut self, previous: ConversionSession) {
+        self.history = previous.history;
+        self.history.extend(previous.results);
+        self.results_open = previous.results_open;
+        self.results_sort = previous.results_sort;
+    }
+
+    /// Every file of the queue that has finished, in the order it finished.
+    pub fn all_results(&self) -> impl Iterator<Item = &ConversionResult> {
+        self.history.iter().chain(&self.results)
+    }
+
+    /// The table is worth offering once the queue holds more than one file.
+    pub fn offers_results(&self) -> bool {
+        self.history.len() + self.sources.len().max(self.results.len()) > 1
+            && self.all_results().next().is_some()
     }
 
     pub fn poll(&mut self) {
@@ -1433,6 +1461,20 @@ pub fn show_progress(
                 {
                     action = ProgressAction::OpenFolder;
                 }
+                if session.offers_results()
+                    && ui
+                        .add(theme::secondary_button(tr_str(
+                            "Mostra risultati",
+                            "Show results",
+                        )))
+                        .on_hover_text(tr_str(
+                            "Tabella dei file convertiti: dimensione prima e dopo e spazio risparmiato",
+                            "Table of the converted files: size before and after and space saved",
+                        ))
+                        .clicked()
+                {
+                    session.results_open = true;
+                }
                 if !session.finished {
                     let paused = session.pause.load(std::sync::atomic::Ordering::Relaxed);
                     let label = if paused {
@@ -1480,6 +1522,17 @@ pub fn show_progress(
             });
         });
 
+    if session.results_open {
+        // On top of the progress window, which must not close underneath it.
+        let mut sort = session.results_sort;
+        let results: Vec<&ConversionResult> = session.all_results().collect();
+        let closed = crate::results::show(ctx, &results, &mut sort);
+        session.results_sort = sort;
+        if closed {
+            session.results_open = false;
+        }
+        return action;
+    }
     if modal.should_close() && session.finished {
         action = ProgressAction::Close;
     }

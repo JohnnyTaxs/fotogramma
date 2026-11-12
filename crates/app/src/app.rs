@@ -996,9 +996,12 @@ impl FotogrammaApp {
             self.waiting.clear();
             return;
         }
-        self.session = None;
+        let previous = self.session.take();
         let next = self.waiting.remove(0);
         self.start_conversion(next, ctx);
+        if let (Some(previous), Some(session)) = (previous, self.session.as_mut()) {
+            session.continue_from(previous);
+        }
     }
 
     /// Keep the library in step with the conversions of the session. A video
@@ -2592,6 +2595,81 @@ mod small_snapshot_tests {
         // ... but it says so, and "select all" no longer takes it.
         harness.get_by_label("Già convertito");
         harness.get_by_label("Seleziona tutti (1)");
+    }
+
+    #[test]
+    fn the_results_of_several_files_open_in_a_table() {
+        use egui_kittest::kittest::Queryable;
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        finish_with(harness.state_mut(), vec![done("Tramonto.mkv", false)]);
+        harness.run();
+        assert!(
+            harness.query_by_label("Mostra risultati").is_none(),
+            "one file: the window already says it all"
+        );
+
+        let mut failed = done("Gita al lago.mp4", false);
+        failed.success = false;
+        failed.new_size = None;
+        failed.message = "ffmpeg exited with code 1".to_string();
+        finish_with(
+            harness.state_mut(),
+            vec![done("Tramonto.mkv", false), failed],
+        );
+        harness.run();
+        harness.get_by_label("Mostra risultati").click();
+        harness.run();
+        harness.get_by_label("Risultati della conversione");
+        harness.get_by_label("Tramonto.mkv");
+        harness.get_by_label("Convertito");
+        harness.get_by_label("Errore");
+        harness.get_by_label_contains("Totale: da ");
+        // The progress window has its own Close underneath: the table's is the last.
+        harness
+            .query_all_by_label("Chiudi")
+            .last()
+            .expect("the table can be closed")
+            .click();
+        harness.run();
+        assert!(!harness.state().session.as_ref().unwrap().results_open);
+        assert!(
+            harness.state().session.is_some(),
+            "closing the table keeps the progress window"
+        );
+    }
+
+    #[test]
+    fn the_results_cover_every_batch_of_the_queue() {
+        let _lang = lang_guard();
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1050.0, 680.0))
+            .build_eframe(demo_app);
+        harness.run();
+        let ctx = harness.ctx.clone();
+        let app = harness.state_mut();
+        finish_with(app, vec![done("Tramonto.mkv", false)]);
+        app.session.as_mut().unwrap().poll();
+        app.waiting.push(ConversionPlan {
+            videos: Vec::new(),
+            profile: fotogramma_core::conversion::profile("balanced").unwrap(),
+            destination_dir: PathBuf::from("/x"),
+            container: "mkv".to_string(),
+            replace_original: false,
+            options: crate::worker::ConversionOptions::default(),
+            after: PowerAction::Nothing,
+        });
+        app.advance_queue(&ctx);
+        let session = app.session.as_ref().unwrap();
+        assert!(!session.finished, "the next batch is running");
+        assert_eq!(session.all_results().count(), 1);
+        assert_eq!(
+            session.history[0].source,
+            PathBuf::from("/Filmati/Tramonto.mkv")
+        );
     }
 
     #[test]

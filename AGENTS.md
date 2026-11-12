@@ -67,6 +67,7 @@ git diff --check
 | `crates/app/src/icon.rs` | Apply the bundled icon to the macOS Dock at startup. |
 | `crates/app/src/table.rs` | Virtualized table, filters, sorting, selection, exact column widths. |
 | `crates/app/src/dialogs.rs` | Preferences window, conversion settings, command preview, progress, results, close confirmation. |
+| `crates/app/src/results.rs` | The table of a queue's results (outcome, size before and after, saving, total), opened from the progress window. It covers every batch of the queue (`ConversionSession::history`). |
 | `crates/app/src/worker.rs` | Scan and conversion threads; communicate only through channels. |
 | `crates/app/src/theme.rs` | Cinema Pop colors and embedded Outfit/IBM Plex Mono. Do not introduce HTML/CSS or a second theme. |
 | `crates/app/src/settings.rs` | TOML preferences and defaults (accepted codecs, conversion defaults); config directory disabled under `cfg!(test)`. |

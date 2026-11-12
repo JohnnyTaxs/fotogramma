@@ -58,7 +58,7 @@ Fotogramma is the one that shows you the library first (what is not H.265, how m
 - **Your own presets:** save the custom profile under a name.
 - **Japanese and Korean file names** are drawn with a system font when a scan finds them.
 - **Command line:** `fotogramma-cli scan <folder>` lists what is left to convert, with no window.
-- **Space saved:** each converted file shows its new size against the old one, and the end of a conversion reports the total space freed (or used, if a file grew).
+- **Space saved:** each converted file shows its new size against the old one, and the end of a conversion reports the total space freed (or used, if a file grew). With more than one file, **Show results** opens a table of every file in the queue with its size before and after and the space it saved.
 - **Content type:** anime or live action (films and series). Anime gets `-tune animation`; "Automatic" reads the folders of the path (`Anime`, `Film`, `Serie TV`, `Movies`…), in English and Italian.
 - **Self-update, only if you say so:** the first time you start the app it asks whether it may check GitHub for updates at startup; nothing is requested until you say yes. If it finds a newer version it shows the release notes and installs it after verifying its checksum. **Check for Updates…** in the menu answers with a card: a spinner, then "You are up to date" (or why it failed).
 - **English and Italian**, chosen automatically from the system language, with an optional manual override.
